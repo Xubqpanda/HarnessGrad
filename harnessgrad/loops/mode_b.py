@@ -193,7 +193,8 @@ def _run_mode_b(args, work, man, run_id, mode, curve, h0_sha, run_dir, base,
         _save_round_state(run_dir, i, work)
         t0 = time.time()
         if has_manifest:
-            res = evaluate(work, tasks, scorable, cache, harness_sha=sha,
+            res = evaluate(work, tasks, scorable, cache, harness_sha=sha, jobs=args.jobs,
+                           trials=args.trials,
                            sandbox=args.sandbox, setups=setups,
                            verifiers=verifiers, envs=envs, run_id=run_id,
                            run_seed=os.environ["HARNESSGRAD_SEED"],
@@ -231,8 +232,10 @@ def _run_mode_b(args, work, man, run_id, mode, curve, h0_sha, run_dir, base,
             split=split,
             env_record=_env_record(envs, task_ids if res else []),
             cost=_cost_of(res, len(tasks), dt,
-                          step.get("claimed_cost", {}).get("generation_tokens")),
+                          step.get("claimed_cost")),
             cumulative=cumulative,
+            n_trials=(res or {}).get("trials"), score_std=(res or {}).get("score_std"),
+            per_task_std=(res or {}).get("per_task_std"),
             selection={
                 "selected_on_reported_set": traj.get("selected_on_reported_set"),
                 "selection_pool_size": traj.get("selection_pool_size"),

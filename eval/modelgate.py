@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import socket
 import socketserver
+import sys
 import threading
 import urllib.parse
 
@@ -71,16 +72,26 @@ class GatewayUnavailable(RuntimeError):
 # 已经被验证过的路。
 
 
-def _pump(src: socket.socket, dst: socket.socket) -> None:
+def _pump(src: socket.socket, dst: socket.socket, side: str,
+          stats: "GatewayStats", conn: dict) -> None:
+    """Copy one direction until it ends, and *say which side ended it*.
+
+    `side` names the source, so it is also the answer to "who hung up": a pump over
+    `(client -> upstream)` that ends on EOF means the harness closed, and one over
+    `(upstream -> client)` means the model did. The distinction is the whole of the
+    attribution below: both produce the same `APIConnectionError` in the harness.
+    """
     try:
         while True:
             chunk = src.recv(65536)
             if not chunk:
                 break
+            stats.add_bytes(side, len(chunk))
             dst.sendall(chunk)
-    except OSError:
-        pass
+    except OSError as exc:
+        stats.add_error(side, exc)
     finally:
+        stats.first_close(conn, side)
         # Half-close rather than close: the reply may still be in flight the other way,
         # and a hard close here truncates responses on any request larger than one read.
         try:
@@ -89,18 +100,119 @@ def _pump(src: socket.socket, dst: socket.socket) -> None:
             pass
 
 
+class GatewayStats:
+    """What one gateway saw, counted, safe to read while it is running.
+
+    The measured reason this exists: 20 of 91 task-runs of one experiment died with the
+    harness printing `APIConnectionError: Connection error.`, and the record said only
+    `model_gateway: {published: true, target: "127.0.0.1:8001"}`. "The model was down",
+    "the model hung up on an idle keep-alive connection" and "the container's network
+    dropped it" all produce that one client-side string, and they have three different
+    fixes -- so a record that cannot separate them cannot be acted on. Counted here rather
+    than inferred from the harness's stderr because the gateway is the only party that can
+    see both ends.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._connections = 0
+        self._connect_failed = 0
+        self._connect_error: str | None = None
+        self._bytes = {"client": 0, "upstream": 0}
+        self._closed_first = {"client": 0, "upstream": 0}
+        self._errors: list[str] = []
+
+    def connection(self) -> None:
+        with self._lock:
+            self._connections += 1
+
+    def connect_failed(self, exc: BaseException) -> None:
+        with self._lock:
+            self._connect_failed += 1
+            self._connect_error = f"{type(exc).__name__}: {exc}"
+
+    def add_bytes(self, side: str, n: int) -> None:
+        with self._lock:
+            self._bytes[side] = self._bytes.get(side, 0) + n
+
+    def add_error(self, side: str, exc: BaseException) -> None:
+        with self._lock:
+            # Capped: a task that dies early can produce thousands of identical lines, and
+            # a record is not a log.
+            if len(self._errors) < 8:
+                self._errors.append(f"{side}: {type(exc).__name__}: {exc}")
+
+    def first_close(self, conn: dict, side: str) -> None:
+        """The first pump of one connection to finish decides who hung up on whom."""
+        with self._lock:
+            if conn.get("closed_by"):
+                return
+            conn["closed_by"] = side
+            self._closed_first[side] = self._closed_first.get(side, 0) + 1
+
+    def as_dict(self) -> dict:
+        with self._lock:
+            return {
+                "connections": self._connections,
+                "upstream_connect_failed": self._connect_failed,
+                "upstream_connect_error": self._connect_error,
+                "upstream_closed_first": self._closed_first.get("upstream", 0),
+                "client_closed_first": self._closed_first.get("client", 0),
+                "bytes_to_upstream": self._bytes.get("client", 0),
+                "bytes_to_client": self._bytes.get("upstream", 0),
+                "read_errors": list(self._errors),
+            }
+
+
+def describe(record: dict | None) -> str:
+    """The gateway's own account of a task's connections, as one clause.
+
+    Written for the `invalid` record: a task that died on a connection error has to name
+    the party, and `module: {published, target}` names only the mechanism. Empty when
+    there was no gateway, because then there is nothing to attribute -- an endpoint
+    reachable without one cannot fail *through* it.
+    """
+    if not record or not record.get("published"):
+        return ""
+    parts = [f"{record.get('connections', 0)} connection(s)"]
+    if record.get("upstream_connect_failed"):
+        parts.append(f"{record['upstream_connect_failed']} could not reach the model "
+                     f"({record.get('upstream_connect_error') or 'no error text'})")
+    if record.get("upstream_closed_first"):
+        parts.append(f"{record['upstream_closed_first']} the model hung up first -- an idle "
+                     f"keep-alive close, see eval/modelgate.py")
+    if record.get("client_closed_first"):
+        parts.append(f"{record['client_closed_first']} the harness closed first")
+    if record.get("read_errors"):
+        parts.append("errors: " + "; ".join(record["read_errors"][:3]))
+    return " (gateway saw " + ", ".join(parts) + ")"
+
+
 class _Handler(socketserver.BaseRequestHandler):
     def handle(self) -> None:
-        target = self.server.target                      # type: ignore[attr-defined]
+        server = self.server
+        target = server.target                      # type: ignore[attr-defined]
+        stats = server.stats                        # type: ignore[attr-defined]
+        stats.connection()
         try:
             upstream = socket.create_connection(target, timeout=15)
-        except OSError:
-            # The model is down or unreachable. Closing the connection is the honest
-            # answer: the harness sees a connection error, which is what happened.
+        except OSError as exc:
+            # **Reported now, not swallowed.** The model is down or unreachable, and
+            # closing the connection is still the honest answer -- the harness sees a
+            # connection error, which is what happened. What changed is that the gateway
+            # also says so: this line is the only place the reason (`Connection refused`,
+            # a DNS failure, a 15 s timeout) exists at all. Measured before this: a whole
+            # run's worth of these produced one identical harness-side string and no cause.
+            stats.connect_failed(exc)
+            print(f"model gateway: cannot reach {target[0]}:{target[1]}: "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
             return
+        conn: dict = {}
         with upstream:
-            both = [threading.Thread(target=_pump, args=(self.request, upstream)),
-                    threading.Thread(target=_pump, args=(upstream, self.request))]
+            both = [threading.Thread(target=_pump,
+                                     args=(self.request, upstream, "client", stats, conn)),
+                    threading.Thread(target=_pump,
+                                     args=(upstream, self.request, "upstream", stats, conn))]
             for t in both:
                 t.daemon = True
                 t.start()
@@ -112,8 +224,9 @@ class _Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-    def __init__(self, address, handler, target):
+    def __init__(self, address, handler, target, stats):
         self.target = target
+        self.stats = stats
         super().__init__(address, handler)
 
 
@@ -132,12 +245,15 @@ class ModelGateway:
         self.port = port
         self._server: _Server | None = None
         self._thread: threading.Thread | None = None
+        #: Counted for the record, not for the data path: nothing in `_pump` consults it.
+        self.stats = GatewayStats()
 
     def start(self) -> "ModelGateway":
         try:
             # Port 0: the platform picks, because a fixed port would collide between
             # concurrent runs and would have to be recorded to be meaningful anyway.
-            self._server = _Server((self.bind_host, self.port), _Handler, self.target)
+            self._server = _Server((self.bind_host, self.port), _Handler, self.target,
+                                   self.stats)
         except OSError as exc:
             raise GatewayUnavailable(
                 f"could not bind a model gateway on {self.bind_host}: {exc}") from exc
@@ -154,6 +270,12 @@ class ModelGateway:
         it would produce a 404 that reads like a wrong model rather than a wrong URL.
         """
         return f"http://{self.bind_host}:{self.port}{self.path}"
+
+    def account(self) -> dict:
+        """What this gateway saw, as plain data. Readable after `stop()` on purpose: the
+        runner assembles the task's result while the gateway is still up, but a reader
+        holding the record only ever sees this dict."""
+        return self.stats.as_dict()
 
     def stop(self) -> None:
         """Never raises: it runs in a `finally` and must not replace the real failure."""

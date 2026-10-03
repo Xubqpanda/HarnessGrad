@@ -511,6 +511,29 @@ def test_the_environment_spend_is_reported_separately_from_the_harness(tmp_path)
     assert silent["harness_tokens"] is None
 
 
+def test_the_improvers_own_split_reaches_the_point():
+    """方法自己那个账本:一个总数加一个拆分。总数给规则,拆分给"为什么这么贵"。
+
+    实测过一个总数不够用:一轮 24 KB 的 harness 源码进、200 token 出,总数涨的时候
+    看不出是"读得多"还是"想得多",而这两件事的修法完全不同。
+    """
+    cost = _cost_of({"tokens": {"input": 10, "output": 5, "tasks_reported": 1}}, 1, 1.0,
+                    {"generation_tokens": 2000, "method_input_tokens": 1800,
+                     "method_output_tokens": 200, "method_model_calls": 2,
+                     "method_model": "m-real"})
+    assert cost["method_generation_tokens"] == 2000
+    assert cost["generation_tokens"] == 2000
+    assert (cost["method_generation_input"], cost["method_generation_output"]) == (1800, 200)
+    assert (cost["method_model_calls"], cost["method_model"]) == (2, "m-real")
+
+    # 老调用方传裸数字,和"根本没有方法"两种老记录都不能坏。
+    assert _cost_of(None, 0, 0.0, 7)["method_generation_tokens"] == 7
+    nothing = _cost_of(None, 0, 0.0)
+    assert nothing["method_generation_tokens"] is None
+    assert nothing["generation_tokens"] == 0
+    assert nothing["method_generation_input"] is None, "没测到不是 0"
+
+
 # ------------------------------------------------- the two driver refusals ---
 
 def _run_driver(tmp_path: Path, dataset: str, *, extra_env=None, extra_argv=(),
@@ -754,8 +777,15 @@ def test_a_containerised_harness_gets_its_model_and_not_the_internet(tmp_path):
     assert net == "offline", "the task silently gained the internet"
     assert "127.0.0.1" not in base, (
         f"the harness was handed the loopback address, which it cannot reach: {base}")
-    assert result["model_gateway"] == {
-        "published": True, "target": f"127.0.0.1:{port}"}
+    assert result["model_gateway"]["published"] is True
+    assert result["model_gateway"]["target"] == f"127.0.0.1:{port}"
+    # The gateway's own account of the call that just went through it. Byte counts are the
+    # ones that cannot be faked by a gateway that only *thinks* it forwarded something:
+    # the harness's request went up and the reply came back.
+    gw = result["model_gateway"]
+    assert gw["connections"] == 1, gw
+    assert gw["bytes_to_upstream"] > 0 and gw["bytes_to_client"] > 0, gw
+    assert gw["upstream_connect_failed"] == 0 and gw["read_errors"] == [], gw
 
 
 def test_a_remote_model_with_an_offline_network_is_refused(tmp_path):

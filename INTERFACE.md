@@ -1164,6 +1164,47 @@ reads this and only this.** Get it wrong and everything above it is wrong.
    formula is not about. A point may carry `env.variants` when the scored tasks do not
    share one environment.
 
+### 3.1 Two measurement parameters, and the fields they add
+
+A point's `score` is the **mean over `n_trials` samples of each task**, measured with up to
+`jobs` tasks running at once. They are separate axes and they multiply: `trials` buys a
+spread, `jobs` buys wall clock.
+
+* **`--trials N`** (default 1). Each `(harness, task)` pair is measured N times; the task's
+  score is the mean over those samples and `per_task_std[task_id]` is their **population**
+  standard deviation (these are all the trials this run took, not a sample of a larger
+  population). The point carries `n_trials` and `score_std` **only when `N > 1`**: with one
+  sample there is no spread to report, and a recorded `0.0` would claim there was none.
+  *Reason: measured on this platform, **the same unmodified harness scored 0.333 in one run
+  and 0.000 in the next** — the agent model intermittently emits a tool call the harness
+  cannot parse, and the harness then ends the task. A curve that does not say how noisy it
+  is cannot support a claim that an edit helped.*
+* **`--jobs N`** (default 1). Up to N tasks are measured concurrently, and `run_meta.json`
+  records the value. The tasks are independent by construction — own container, own network,
+  own model gateway, own workspace, own cache key — but they share one model endpoint and
+  one host, which is why one is the default and why the number used is recorded. *Reason:
+  87.8% of a measured three-task run's wall clock (2578 s of 2936 s) was the harness's own
+  agent loop, with the platform idle for all of it.*
+
+Three more fields exist so that two runs can be told apart at all:
+
+* **`identity.skill_sha`** — sha256 of the platform skill the method was offered
+  (`improvers/skill.md`), read when the point is written. `improver` says which tool composed
+  the edits; this says what the tool was told, and the same tool with a different skill
+  produces different edits. Omitted when no skill was staged.
+* **`cost.method_generation_input` / `method_generation_output` / `method_model_calls` /
+  `method_model`** — the improver's own spend as its provider reported it, kept beside
+  `method_generation_tokens` (which stays the single number a cost-aware rule reads). *The
+  split is what distinguishes "read a lot" from "thought a lot": our own improver's round is
+  ~24 KB of harness sources in and ~200 tokens out.*
+* **`env.model_gateway`** carries the gateway's own connection counts (`connections`,
+  `upstream_connect_failed`, `upstream_connect_error`, `upstream_closed_first`,
+  `client_closed_first`, `bytes_to_upstream`, `bytes_to_client`, `read_errors`) beside
+  `published` and `target`. *Reason: a harness that dies on `APIConnectionError: Connection
+  error` and a harness whose model endpoint hung up on an idle keep-alive connection are the
+  same string from inside the container and different facts about the measurement.* A
+  harness that dies that way is `invalid` with `stage: "harness model call"` — never `0.0`.
+
 ---
 
 ## 4. The method interface

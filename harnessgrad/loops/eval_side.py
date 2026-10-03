@@ -118,6 +118,7 @@ def _run_eval_side(*, work: Path, man: dict, run_id: str, run_dir: Path, tasks: 
                              f"{(eval_from or {}).get('round')}")
     t0 = time.time()
     res = evaluate(work, tasks, scorable, cache, harness_sha=sha, sandbox=args.sandbox,
+                   trials=args.trials, jobs=args.jobs,
                    setups=setups, verifiers=verifiers, envs=envs, run_id=run_id,
                    run_seed=os.environ["HARNESSGRAD_SEED"],
                    recordings_root=run_dir / "recordings", round_no=0)
@@ -152,7 +153,8 @@ def _run_eval_side(*, work: Path, man: dict, run_id: str, run_dir: Path, tasks: 
         harness_runtime=res.get("harness_runtime"),
         cost=_cost_of(res, len(tasks), cumulative["wall_clock_s"]),
         cumulative=cumulative, label="exam", side="eval",
-        evaluated_from=eval_from)
+        evaluated_from=eval_from, n_trials=res.get("trials"),
+        score_std=res.get("score_std"), per_task_std=res.get("per_task_std"))
     point["measured_by_platform"] = True
     point["verifier_kinds"] = sorted({(verifiers.get(t) or {}).get("kind", "answer")
                                       for t in scored})

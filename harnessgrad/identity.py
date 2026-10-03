@@ -6,18 +6,21 @@ improver composed the edits, on which side of the split, measured where. It is a
 from a manifest, the models the run actually used, and whatever the harness declared about
 itself in its own trace.
 
-Pure on purpose -- no docker, no HTTP, no filesystem beyond what it is handed. The improver
-used to be a module-level global here that `main()` assigned into; it is an argument now,
-so "what does this point claim" is answerable without running a program, and a caller that
-forgets it gets an identity with no improver rather than one run's improver leaking into
-another's record.
+Pure on purpose -- no docker, no HTTP, and no filesystem beyond what it is handed, with one
+deliberate exception that `_skill_sha` documents: the skill text is the platform's own input
+to the method, it is a single fixed path, and a point that does not name it cannot be
+compared with a point taken after it was edited. The improver used to be a module-level
+global here that `main()` assigned into; it is an argument now, so "what does this point
+claim" is answerable without running a program, and a caller that forgets it gets an
+identity with no improver rather than one run's improver leaking into another's record.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 
-from harnessgrad import FRAMEWORK_VERSION
+from harnessgrad import FRAMEWORK_VERSION, PLATFORM_ROOT
 
 def _model_of(declared: dict | None) -> str | None:
     """Which model actually answered, and where that answer came from.
@@ -45,6 +48,31 @@ def _conflict(declared: dict | None) -> dict:
                 "note": "the harness did not use HG_AGENT_MODEL; the declaration is "
                         "what ran"}
     return {}
+
+def _skill_sha() -> str | None:
+    """The sha256 of the skill the platform offered the method this round, or nothing.
+
+    `improver` says *which tool* composed the candidate. It says nothing about what that
+    tool was told, and the skill is the platform's own input to the method -- the same
+    improver given a different skill produces different edits. Measured reason this field
+    exists: `improvers/skill.md` gained a fourth failure mode between two runs, both points
+    named the same method and the same improver version, the edits changed, and nothing in
+    either record said why. That is a comparison a reader cannot make, which is the whole
+    job of this block.
+
+    Read per call, not cached at import, because the platform may edit its own skill between
+    rounds of one run -- self-improvement on the method side is a case this platform exists
+    to measure, and a hash frozen at import would report the first round's skill forever.
+
+    `None` when the file is absent, which is a real state: a run with no default skill stages
+    no `SKILL.md`, and the field is then omitted rather than hashed over an empty file.
+    """
+    try:
+        return hashlib.sha256(
+            (PLATFORM_ROOT / "improvers" / "skill.md").read_bytes()).hexdigest()
+    except OSError:
+        return None
+
 
 #: The fields of a resolved improver that belong on a curve point. `ok` and `reason` are
 #: bookkeeping for the process that resolved it and are dropped: a record should carry what
@@ -117,6 +145,8 @@ def _identity(man: dict, sha: str, mode: str, method_model: str = "n/a",
         # codex builds coexist on one machine (measured: 0.125.0 broken, 0.139.0, 0.156.1)
         # and `latest` is a request, not an identity.
         **({"improver": _improver_identity(improver)} if improver else {}),
+        # Which instructions the improver was given, kept apart from which improver it was.
+        **({"skill_sha": s} if (s := _skill_sha()) else {}),
         **({"harness_identity": declared} if declared else {}),
         **({"agent_model_conflict": c} if (c := _conflict(declared)) else {}),
     }

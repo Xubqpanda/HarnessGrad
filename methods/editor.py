@@ -609,6 +609,57 @@ def parse_reply(text: str) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+# ------------------------------------------------------------ what it cost ---
+
+#: The model calls **this method invocation** has made, in tokens.
+#:
+#: Module-level because the process *is* the invocation: the driver spawns one method
+#: process per round and reads its reply once. Before this existed, every method had to
+#: remember to carry a number from wherever it called the model down to `report`, and the
+#: measured result was that none of them did -- `cost.method_generation_tokens` was 0 on
+#: every round of every run, including rounds where the improver answered six model calls
+#: over a 24 KB prompt. A cost-aware acceptance rule was therefore reading a constant, and
+#: a constant is a rule that permits everything.
+_SPENT: dict = {"input": 0, "output": 0, "calls": 0, "model": None}
+
+
+def spent() -> dict:
+    """A copy of what this process has spent so far.
+
+    `calls` is the field that keeps an unreported spend from looking like no spend: an
+    OpenAI-compatible endpoint that omits `usage` leaves the token sums at 0, and a reader
+    otherwise cannot tell "the improver did nothing" from "the improver's spend was not
+    reported".
+    """
+    return dict(_SPENT)
+
+
+def spent_tokens() -> int:
+    """Input + output: the single number the method reply carries as `generation_tokens`."""
+    return _SPENT["input"] + _SPENT["output"]
+
+
+def reset_spent() -> None:
+    """Start a fresh accounting window inside one process.
+
+    A method process is one invocation and calls `report` once, so no method needs this.
+    It exists for a caller that wants the spend of one *phase* rather than of the process
+    -- the two-stage loops that ask a proposer and then a critic -- and for tests, which
+    share an interpreter and would otherwise read each other's numbers.
+    """
+    _SPENT.update(input=0, output=0, calls=0, model=None)
+
+
+def _record_usage(usage, model: str | None) -> None:
+    """Add one reply's usage. One call is counted whether or not the provider reported it."""
+    _SPENT["calls"] += 1
+    _SPENT["model"] = getattr(usage, "model", None) or model or _SPENT["model"]
+    if usage is None:
+        return
+    _SPENT["input"] += int(getattr(usage, "prompt_tokens", 0) or 0)
+    _SPENT["output"] += int(getattr(usage, "completion_tokens", 0) or 0)
+
+
 def ask(prompt: str, system: str = DEFAULT_SYSTEM, base: Path | None = None) -> dict:
     """One model call, with a bounded retry when the reply cannot be read.
 
@@ -642,6 +693,10 @@ def ask(prompt: str, system: str = DEFAULT_SYSTEM, base: Path | None = None) -> 
                       {"role": "user", "content": prompt}],
         )
         last = resp.choices[0].message.content or ""
+        # Counted before the reply is judged. A retry that produced unparseable JSON is
+        # still a call the method paid for, and a parse failure is exactly when someone
+        # asks what the round cost.
+        _record_usage(getattr(resp, "usage", None), getattr(resp, "model", None) or model)
         # Debug affordance: `HG_METHOD_DUMP=<path>` writes the raw reply out. A model
         # reply that will not parse is the hardest failure to diagnose from the
         # outside -- the platform only ever sees "unparseable" and 200 characters of
@@ -758,7 +813,7 @@ def propose_and_apply(base: Path, req: dict, system: str, prompt_for, *,
 def report(req: dict, *, method: str, harness_dir: Path, changed: bool,
            files: list[str] | None = None, hypothesis: str = "",
            edit_kind: str | None = None, method_reported: dict | None = None,
-           acceptance_rule: str = "", tokens: int = 0, label: str = "",
+           acceptance_rule: str = "", tokens: int | None = None, label: str = "",
            extra: dict | None = None, stop: bool | None = None,
            note: str | None = None) -> int:
     """Write the trajectory and emit the reply. Every exit path goes through here.
@@ -781,7 +836,15 @@ def report(req: dict, *, method: str, harness_dir: Path, changed: bool,
     has nothing left to say is finished. Left unset, `stop` defaults to
     `not changed`, which is the behaviour every method had before the field
     existed. A filter sets `stop=False` and keeps its budget.
+
+    `tokens=None` means **what this process spent**, not zero: the numbers come from
+    `spent()` (see `_SPENT`). A method may still pass an explicit count, and the one that
+    passes 0 is a method that made no model call at all (`echo_base`), which is a fact
+    rather than a default.
     """
+    spent_now = spent()
+    if tokens is None:
+        tokens = spent_now["input"] + spent_now["output"]
     if changed:
         problems = candidate.validate(Path(harness_dir))
         if problems:
@@ -794,7 +857,16 @@ def report(req: dict, *, method: str, harness_dir: Path, changed: bool,
             "harness_dir": str(harness_dir),
             "label": label or hypothesis[:80] or ("edit" if changed else "no change"),
             "edit_kind": edit_kind or ("none" if not changed else "harness_source"),
-            "claimed_cost": {"generation_tokens": tokens},
+            # `generation_tokens` is the contract field and stays the single number a
+            # cost-aware rule reads. The split is kept beside it because it is the part
+            # that says *why* the number is large: measured on our own improver, one
+            # round is ~24 KB of harness sources in and ~200 tokens out, so a rising
+            # improver cost is a source-reading cost, not a thinking cost.
+            "claimed_cost": {"generation_tokens": tokens,
+                             "method_input_tokens": spent_now["input"] or None,
+                             "method_output_tokens": spent_now["output"] or None,
+                             "method_model_calls": spent_now["calls"] or None,
+                             "method_model": spent_now["model"]},
             "method_reported": {"score": None, **(method_reported or {})},
         }],
         "trajectory_shape": "sequence",
@@ -808,14 +880,24 @@ def report(req: dict, *, method: str, harness_dir: Path, changed: bool,
             **(extra or {}),
         },
     }
-    out = Path(req.get("trajectory_out") or "")
-    if out:
+    # `Path("")` is `PosixPath('.')`, which is truthy, so the old `if out:` guard let a
+    # request with no `trajectory_out` through and then wrote the trajectory *onto a
+    # directory*. The driver always sets the key, so this only ever hit a method invoked
+    # by hand -- which is exactly how the next person will invoke it.
+    raw_out = req.get("trajectory_out")
+    out = Path(raw_out) if raw_out else None
+    if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(trajectory, indent=1))
 
     response = {"modified": bool(changed), "changed": bool(changed),
                 "files": list(files or []), "hypothesis": hypothesis,
                 "generation_tokens": tokens,
+                # What the process itself saw the provider report. Kept apart from
+                # `generation_tokens` on purpose: the claim and the observation are two
+                # statements, and a method that counts its own calls by hand is exactly
+                # the case where they can disagree.
+                "method_usage": spent_now,
                 "method_reported": method_reported or {}}
     if stop is not None:
         response["stop"] = bool(stop)

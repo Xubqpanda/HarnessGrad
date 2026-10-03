@@ -127,6 +127,27 @@ def main() -> int:
     ap.add_argument("--sampling", default="all",
                     help="all | below_X | above_X | random_N  (chosen on H0)")
     ap.add_argument("--rounds", type=int, default=3)
+    #: How many times each (harness, task) pair is measured. One is one sample, and one
+    #: sample cannot tell an edit's effect from the noise: measured here, the same
+    #: unmodified harness scored 0.333 in one run and 0.000 in the next because the agent
+    #: model intermittently emits a tool call the harness cannot parse. Costs `trials`x
+    #: the wall clock -- 88% of a run is the harness loop -- so a first look uses 1 and a
+    #: claim about an edit uses 3.
+    ap.add_argument("--trials", type=int, default=1,
+                    help="measure each task N times; the point carries n_trials and "
+                         "score_std. Default 1 (one sample, no spread recorded)")
+    #: How many tasks are measured **at the same time**. The other axis from `--trials`,
+    #: and they multiply: trials buy a spread, jobs buy wall clock. Measured here, 87.8%
+    #: of a run's wall clock is the harness's own agent loop (2578 s of 2936 s on a
+    #: three-task round) and the platform does nothing while it waits, so a task set run
+    #: four at a time is close to four times shorter. The tasks are independent by
+    #: construction -- own container, own network, own gateway, own workspace -- but they
+    #: share the model endpoint and this host's CPU, which is why the default stays 1: a
+    #: number produced under contention is not comparable with one produced without it,
+    #: and the run records the value it used.
+    ap.add_argument("--jobs", type=int, default=1,
+                    help="measure up to N tasks concurrently (default 1). The tasks share "
+                         "one model endpoint and one host, so raise it deliberately")
     ap.add_argument("--mode", default="A", choices=["A", "B"],
                     help="A=platform drives the loop (default); B=the method runs "
                          "its own loop and is reached through its own entrypoint")
@@ -522,6 +543,11 @@ def main() -> int:
         agent_backend=model["backend"],
         framework_version=FRAMEWORK_VERSION,
         method_entrypoint=args.method_entrypoint,
+        # The two measurement parameters, on the run itself: `n_trials` rides on each
+        # curve point, but "how many tasks at once" is not a property of a point -- it is
+        # a property of the run that produced all of them, and a reader comparing two
+        # runs needs to know whether one was under four-way contention.
+        trials=args.trials, jobs=args.jobs,
         # The run's first write: drop anything a previous run left under this id.
         fresh=True,
     )
@@ -578,6 +604,7 @@ def main() -> int:
     # ---- round 0: score H0 on everything, then fix the task set from it ----
     t0 = time.time()
     base = evaluate(work, tasks_all, scorable, cache, harness_sha="H0",
+                    trials=args.trials, jobs=args.jobs,
                     sandbox=args.sandbox, setups=setups, verifiers=verifiers,
                     envs=envs, run_id=run_id, run_seed=os.environ["HARNESSGRAD_SEED"],
                     recordings_root=run_dir / "recordings")
@@ -656,7 +683,9 @@ def main() -> int:
         harness_runtime=base.get("harness_runtime"),
         env_record=_env_record(envs, task_ids),
         cost=_cost_of(base, len(tasks_all), cumulative["wall_clock_s"]),
-        cumulative=cumulative, label="H0 (base harness)")]
+        cumulative=cumulative, label="H0 (base harness)",
+        n_trials=base.get("trials"), score_std=base.get("score_std"),
+        per_task_std=base.get("per_task_std"))]
     # The base harness is always evaluated by the platform, so its point is a
     # platform measurement like any other. Leaving the field unset made the
     # exported record claim the score was the method's -- the opposite of true.

@@ -1,6 +1,7 @@
 """Execute a harness on a task set. Framework-owned (INTERFACE.md §0)."""
 from __future__ import annotations
 
+import concurrent.futures as futures
 import json
 import os
 import shutil
@@ -473,8 +474,12 @@ def run_one(repo: Path, task: dict, timeout_s: int = 300,
                 "verdict": verdict, "env_usage": env_usage,
                 "harness_runtime": harness_runtime.record(
                     overlay, platform_interpreter=(image_python is None)),
+                # `account()` and not just "published": the connection counts are what
+                # turn a harness-side `Connection error` into a named cause. Read while
+                # the gateway is still up -- `finally` stops it right after this returns.
                 "model_gateway": ({"published": True,
-                                   "target": f"{model_gateway.target[0]}:{model_gateway.target[1]}"}
+                                   "target": f"{model_gateway.target[0]}:{model_gateway.target[1]}",
+                                   **model_gateway.account()}
                                   if model_gateway is not None else None),
                 "identity": _last_identity(trace)}
     finally:
@@ -656,7 +661,8 @@ def _run_one_container_state(repo: Path, task: dict, *, env_spec: dict, setup,
                     "harness_runtime": harness_runtime.record(
                         overlay, platform_interpreter=(image_python_here is None)),
                     "model_gateway": ({"published": True,
-                                       "target": f"{gateway.target[0]}:{gateway.target[1]}"}
+                                       "target": f"{gateway.target[0]}:{gateway.target[1]}",
+                                       **gateway.account()}
                                       if gateway is not None else None)}
         finally:
             # Teardown is a phase like any other, and it is the one that used to be
@@ -868,6 +874,12 @@ def _verify_container_state(snapshot: str, verifier, *, task_mount: str,
             # detail to decide what to change, so the part that names the failing check
             # has to survive the truncation; raw output is evidence of last resort.
             detail = [f"reward {score:g} from {reward_file} (exit {code})"]
+            #: Set when the platform can *prove* the check never tested anything: it was
+            #: supposed to leave a machine-readable report and did not. The caller turns
+            #: this into an `invalid` task rather than a zero -- a reward of 0 written by a
+            #: check whose tests never ran is not a failed harness (measured: `uvx: command
+            #: not found` inside the container, before this host had an egress proxy).
+            unmeasured = ""
             report_path = spec.get("evidence_file")
             if report_path:
                 got_report = staging / Path(str(report_path)).name
@@ -879,16 +891,15 @@ def _verify_container_state(snapshot: str, verifier, *, task_mount: str,
                     if not failures:
                         detail.append("check_report lists no failing test")
                 else:
-                    # Not a policy change -- the score stays what the check wrote -- but
-                    # the fact has to be on the record: a reward of 0 written by a check
-                    # whose tests never ran is not a failed harness.
-                    detail.append(f"the check wrote no {report_path}: its tests did "
-                                  f"not run, so this 0 is the check's setup, not the "
-                                  f"harness's answer")
+                    unmeasured = (f"the check wrote no {report_path}: its tests did not "
+                                  f"run, so this task was not measured")
+                    detail.append(unmeasured)
             detail.append(_check_output_detail(out, err))
-            return {"kind": kind, "passed": bool(score),
-                    "score": score,
-                    "detail": " | ".join(p for p in detail if p)[:VERDICT_DETAIL_LIMIT]}
+            verdict = {"kind": kind, "passed": bool(score), "score": score,
+                       "detail": " | ".join(p for p in detail if p)[:VERDICT_DETAIL_LIMIT]}
+            if unmeasured:
+                verdict["unmeasured"] = unmeasured
+            return verdict
 
         pass_when = spec.get("pass_when", "exit0")
         passed = code == 0
@@ -1112,6 +1123,20 @@ def _verify(workdir: Path, verifier: dict | None, answer: str,
     return {"kind": "command", "passed": passed, "detail": detail}
 
 
+def _spread(xs: list[float]) -> float:
+    """Population standard deviation, with no dependency and no ambiguity.
+
+    The population form because these are *all* the trials this run took, not a sample
+    from a larger population of runs -- `statistics.pstdev` is the honest name for it, and
+    the difference from `stdev` matters most at small n, which is exactly where a reader
+    compares two harnesses.
+    """
+    if len(xs) < 2:
+        return 0.0
+    mu = sum(xs) / len(xs)
+    return (sum((x - mu) ** 2 for x in xs) / len(xs)) ** 0.5
+
+
 def _harness_failure(result: dict) -> dict | None:
     """Why a harness left nothing to read, when it left nothing.
 
@@ -1165,7 +1190,7 @@ def evaluate(repo: Path, tasks: list[dict], scorable: dict[str, str],
              envs: dict | None = None,
              run_id: str = "", run_seed: str = "",
              recordings_root: Path | None = None,
-             round_no: int = 0) -> dict:
+             round_no: int = 0, trials: int = 1, jobs: int = 1) -> dict:
     """Run a harness over a task set and score it.
 
     `scorable` maps task_id -> expected answer. Scoring lives here, not in the
@@ -1180,7 +1205,45 @@ def evaluate(repo: Path, tasks: list[dict], scorable: dict[str, str],
         return _evaluate(repo, tasks, scorable, cache=cache, harness_sha=harness_sha,
                          sandbox=sandbox, setups=setups, verifiers=verifiers,
                          envs=envs, run_id=run_id, run_seed=run_seed,
-                         recordings_root=recordings_root, round_no=round_no)
+                         recordings_root=recordings_root, round_no=round_no,
+                         trials=trials, jobs=jobs)
+
+
+def _in_parallel(tasks: list[dict], measure, jobs: int) -> dict[str, dict]:
+    """Measure every task, up to `jobs` at a time, and collect the outcomes by task id.
+
+    `jobs=1` stays a plain sequential loop, because the platform's default record must not
+    depend on a thread pool to be the record it has always been.
+
+    Why this axis and not another: on a measured three-task run the agent phase was 87.8% of
+    the wall clock (2578 s of 2936 s) and the platform sat idle for all of it -- the tasks are
+    independent by construction (own container, own network, own model gateway, own workspace,
+    own cache key), so this is the cheap parallelism. Splitting *inside* a task is not
+    available: the harness is a process the platform does not control.
+
+    The first exception is re-raised after cancelling what has not started. A task already
+    running is left to finish: `run_one` tears its own containers down in a `finally`, and
+    abandoning a thread mid-teardown is how a leaked network gets inherited by whatever runs
+    next (§2.5.7).
+    """
+    if jobs <= 1:
+        # Computed in task order, which is what makes the merge reproducible at one
+        # `--jobs` setting as well as comparable across two of them.
+        return {task["task_id"]: measure(index, task)
+                for index, task in enumerate(tasks, start=1)}
+    pool = futures.ThreadPoolExecutor(max_workers=jobs, thread_name_prefix="hg-task")
+    pending = [pool.submit(measure, index, task)
+               for index, task in enumerate(tasks, start=1)]
+    outcomes: dict[str, dict] = {}
+    try:
+        for done in futures.as_completed(pending):
+            outcome = done.result()
+            outcomes[outcome["task_id"]] = outcome
+    except BaseException:
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+    return outcomes
 
 
 def _evaluate(repo: Path, tasks: list[dict], scorable: dict[str, str],
@@ -1190,9 +1253,35 @@ def _evaluate(repo: Path, tasks: list[dict], scorable: dict[str, str],
               envs: dict | None = None,
               round_no: int = 0,
               run_id: str = "", run_seed: str = "",
-              recordings_root: Path | None = None) -> dict:
+              recordings_root: Path | None = None,
+              trials: int = 1, jobs: int = 1) -> dict:
+    """Score a harness on a task set.
+
+    `trials` is how many times each `(harness, task)` pair is measured. One is the
+    default and one is not enough: measured on this platform, **the same unmodified
+    harness scored 0.333 in one run and 0.000 in the next**, because the agent model
+    intermittently emits a tool call in a dialect the harness cannot parse and the harness
+    then ends the task. Nothing about that is a property of the dataset; it is the floor of
+    what a single sample can tell you, and a curve that does not say how noisy it is cannot
+    support a claim that an edit helped. With `trials > 1` a task's score is the mean over
+    trials and `per_task_std` is their spread (population standard deviation).
+
+    `jobs` is how many tasks are measured **at the same time**, and it multiplies with
+    `trials` rather than replacing it: trials buy a spread, jobs buy wall clock. Both are
+    recorded -- `trials` on the point, `jobs` in the run's own parameters -- because a run
+    that used four containers at once is a different claim about this host than one that
+    used one.
+    """
+    if trials < 1:
+        raise ValueError(f"trials must be at least 1, not {trials}")
+    if jobs < 1:
+        raise ValueError(f"jobs must be at least 1, not {jobs}")
     cache = cache if cache is not None else {}
     per_task, traces, verdicts = {}, {}, {}
+    #: One score per trial, per task, kept so a reader can see the spread rather than
+    #: only its mean. Absent when `trials == 1`.
+    per_task_trials: dict[str, list[float]] = {}
+    per_task_std: dict[str, float] = {}
     #: Tasks the platform could not measure, as opposed to ones it measured as zero.
     #: Kept out of `per_task` entirely (INTERFACE.md §2.5.7): a task that never ran is
     #: not a task that scored nothing, and putting a `0.0` here is the specific lie
@@ -1233,22 +1322,24 @@ def _evaluate(repo: Path, tasks: list[dict], scorable: dict[str, str],
     # task touched them is not something a failing run needs.
     before = snapshot(PLATFORM_ROOT)
 
-    for task_index, task in enumerate(tasks, start=1):
+    # ---- one task, `trials` times, as a function ----------------------------------
+    #
+    # Extracted from the loop this used to be so that `--jobs N` can measure several tasks
+    # at once, and the extraction is what makes that safe: this function mutates **nothing**
+    # the other tasks share. It returns what it measured and the merge below writes it,
+    # whereas the loop it came from wrote into eight shared dicts as it went. Two threads
+    # assigning different keys of one dict is not a race, but the *order* of two writes is,
+    # and a curve that pairs one task's score with another task's trace is exactly the kind
+    # of number this platform exists to refuse.
+    def _measure(task_index: int, task: dict) -> dict:
         tid = task["task_id"]
-        key = f"{harness_sha}:{tid}"
-        if key in cache:
-            per_task[tid] = cache[key]["score"]
-            traces[tid] = cache[key]["trace"]
-            if cache[key].get("harness_failed"):
-                harness_failed[tid] = cache[key]["harness_failed"]
-            cached_record = cache[key].get("harness_runtime")
-            if cached_record and cached_record not in runtime_records:
-                runtime_records.append(cached_record)
-            if cache[key].get("harness_output"):
-                harness_output[tid] = cache[key]["harness_output"]
-            if cache[key].get("verdict"):
-                verdicts[tid] = cache[key]["verdict"]
-            continue
+        # The trial count is part of the key: a cached single measurement is not a
+        # cached mean of three, and reusing one for the other would quietly answer a
+        # different question than the run asked.
+        key = f"{harness_sha}:{tid}:{trials}"
+        hit = cache.get(key)
+        if hit is not None:
+            return {"task_id": tid, "cached": hit}
 
         # One task, one record, and the phases inside it belong to it. Where this
         # context is set, `eval/container.py` starts beating while it waits, so a
@@ -1258,44 +1349,144 @@ def _evaluate(repo: Path, tasks: list[dict], scorable: dict[str, str],
         # used to be labelled round 0, including the candidate rounds, so a log could not
         # say which round a task belonged to. The traces and verdicts were stored per
         # round all along; only the live record had lost the number.
-        with progress_mod.task_progress(tid, round_no=round_no, index=task_index,
-                                        total=len(tasks)) as held:
-            try:
-                result = run_one(repo, task, sandbox=sandbox,
-                                 setup=(setups or {}).get(tid),
-                                 verifier=(verifiers or {}).get(tid),
-                                 env=(envs or {}).get(tid),
-                                 run_id=run_id, run_seed=run_seed,
-                                 recordings_root=recordings_root)
-            except BaseException as exc:
-                # The record says the task died and why; the exception still travels.
-                held.failed(f"{type(exc).__name__}: {exc}")
-                raise
+        # One task, `trials` times. See `evaluate` for why one is not enough.
+        measured: list[dict] = []
+        unmeasured: dict | None = None
+        for trial in range(trials):
+            with progress_mod.task_progress(tid, round_no=round_no, index=task_index,
+                                            total=len(tasks)) as held:
+                try:
+                    result = run_one(repo, task, sandbox=sandbox,
+                                     setup=(setups or {}).get(tid),
+                                     verifier=(verifiers or {}).get(tid),
+                                     env=(envs or {}).get(tid),
+                                     run_id=run_id, run_seed=run_seed,
+                                     recordings_root=recordings_root)
+                except BaseException as exc:
+                    # The record says the task died and why; the exception still travels.
+                    held.failed(f"{type(exc).__name__}: {exc}")
+                    raise
 
-            # A task the platform could not measure never reaches scoring. It is *not*
-            # cached either: the cache key is `(harness_sha, tid)` and the reason this
-            # task failed was not the harness, so caching it would carry a dataset bug
+                # A task the platform could not measure never reaches scoring. It is *not*
+                # cached either: the cache key names the harness, and the reason this
+                # task failed was not the harness, so caching it would carry a dataset bug
+                # into every later round and hide the round where it was introduced.
+                if result.get("invalid"):
+                    unmeasured = result["invalid"]
+                    held.failed(str(unmeasured.get("detail") or "")[:200])
+                    break
+                # **The harness died because it could not reach the model endpoint.**
+                # `_provider_failure` has existed since the bug it describes was measured
+                # and was, until this call, only ever exercised by its own tests -- so a run
+                # in which 20 of 91 task-runs died on `APIConnectionError` recorded them as
+                # ordinary non-zero exits, and the curve read a gateway outage as 20 tasks
+                # the harness could not do. Three guard rails, each measured:
+                #
+                #   * a `passed` verdict is kept, because a harness that crashed *after*
+                #     writing the right artifact finished the task (INTERFACE.md §2.2);
+                #   * a trial that already produced a verdict is kept: the endpoint is
+                #     exactly the noise `--trials` exists to average, and discarding the one
+                #     good sample to report a blip is the wrong trade;
+                #   * the gateway's own counts ride along in `detail`, so the record says
+                #     *who* hung up rather than only that a connection failed.
+                provider = _provider_failure(result)
+                if provider is not None and not (result.get("verdict") or {}).get("passed"):
+                    if measured:
+                        print(f"warning: {tid}: trial {trial + 1} died reaching the model "
+                              f"endpoint ({provider['line']}); keeping the "
+                              f"{len(measured)} measured trial(s)", file=sys.stderr)
+                        continue
+                    unmeasured = {
+                        "stage": "harness model call",
+                        "detail": (f"the harness could not reach the model endpoint and "
+                                   f"exited {provider['exit_code']}: {provider['line']}")
+                                  + modelgate_mod.describe(result.get("model_gateway"))}
+                    held.failed(str(unmeasured["detail"])[:200])
+                    break
+                # **A check that never ran is not a zero.** The platform can prove it when the
+                # check was supposed to leave a machine-readable report and did not
+                # (`_verify_container_state` marks the verdict): then nothing tested the
+                # artifact, and recording 0.0 would blame the harness for a task nobody
+                # measured. Same distinction §2.5.7 draws for a task the platform could not
+                # start -- this is the check's own half of it.
+                if (result.get("verdict") or {}).get("unmeasured"):
+                    unmeasured = {"stage": "check",
+                                  "detail": (result["verdict"] or {})["unmeasured"]}
+                    held.failed(str(unmeasured["detail"])[:200])
+                    break
+
+                # The score the platform computed for this task. Set on the holder so the
+                # task's closing record carries it: a panel showing "task 3/5 done" without
+                # the number is a progress bar; with it, it is the round forming.
+                held.score = float((result.get("verdict") or {}).get(
+                    "score", 1.0 if (result.get("verdict") or {}).get("passed") else 0.0))
+
+            measured.append(result)
+
+        if unmeasured is not None:
+            # Not cached, and deliberately: the cache key names the harness, and the reason
+            # this task failed was not the harness, so caching it would carry a dataset bug
             # into every later round and hide the round where it was introduced.
-            if result.get("invalid"):
-                invalid[tid] = result["invalid"]
-                held.failed(str(result["invalid"].get("detail") or "")[:200])
-                continue
+            return {"task_id": tid, "invalid": unmeasured}
+        return {"task_id": tid, "measured": measured}
 
-            # The score the platform computed for this task. Set on the holder so the
-            # task's closing record carries it: a panel showing "task 3/5 done" without
-            # the number is a progress bar; with it, it is the round forming.
-            held.score = float((result.get("verdict") or {}).get(
-                "score", 1.0 if (result.get("verdict") or {}).get("passed") else 0.0))
+    outcomes = _in_parallel(tasks, _measure, jobs)
 
+    # The merge. Sequential and in **task order** on purpose: a run that used `--jobs 3`
+    # and one that did not must produce comparable records, down to the order of
+    # `runtime_records` and `declarations` -- an order decided by whichever thread finished
+    # first would not be.
+    for task_index, task in enumerate(tasks, start=1):
+        tid = task["task_id"]
+        key = f"{harness_sha}:{tid}:{trials}"
+        outcome = outcomes[tid]
+
+        # A cached task never ran: its records are copied back exactly as they were stored.
+        if "cached" in outcome:
+            entry = outcome["cached"]
+            per_task[tid] = entry["score"]
+            if entry.get("per_task_trials"):
+                per_task_trials[tid] = list(entry["per_task_trials"])
+                per_task_std[tid] = float(entry.get("per_task_std") or 0.0)
+            traces[tid] = entry["trace"]
+            if entry.get("harness_failed"):
+                harness_failed[tid] = entry["harness_failed"]
+            cached_record = entry.get("harness_runtime")
+            if cached_record and cached_record not in runtime_records:
+                runtime_records.append(cached_record)
+            if entry.get("harness_output"):
+                harness_output[tid] = entry["harness_output"]
+            if entry.get("verdict"):
+                verdicts[tid] = entry["verdict"]
+            continue
+
+        if outcome.get("invalid"):
+            invalid[tid] = outcome["invalid"]
+            continue
+
+        measured = outcome["measured"]
+        # The records a reader inspects (trace, verdict, harness output) come from the
+        # **last** trial when there is more than one; only one of them can be on disk, and
+        # saying which is the whole of the rule.
+        result = measured[-1]
         # The score is the *platform's* verdict on what the harness left behind, and
         # the harness's exit code deliberately does not enter it: a run that crashed
         # but produced a working artifact completed the task. See INTERFACE.md §2.2.
         verdict = result.get("verdict") or {}
-        # `score` first: a `reward_file` check returns a number and the platform must
-        # use it, not collapse it to "did it pass". A fractional reward is a score
-        # (INTERFACE.md §2.5.9), and discarding it would silently turn a 0.5 into a 1.
-        score = float(verdict.get("score",
-                                  1.0 if verdict.get("passed") else 0.0))
+
+        def _score_of(res: dict) -> float:
+            """`score` first: a `reward_file` check returns a number and the platform must
+            use it, not collapse it to "did it pass". A fractional reward is a score
+            (INTERFACE.md §2.5.9), and discarding it would silently turn a 0.5 into a 1.
+            """
+            v = res.get("verdict") or {}
+            return float(v.get("score", 1.0 if v.get("passed") else 0.0))
+
+        scores = [_score_of(res) for res in measured]
+        score = sum(scores) / len(scores)
+        if trials > 1:
+            per_task_trials[tid] = scores
+            per_task_std[tid] = _spread(scores)
         per_task[tid] = score
         verdicts[tid] = verdict
         traces[tid] = result["trace"]
@@ -1331,6 +1522,8 @@ def _evaluate(repo: Path, tasks: list[dict], scorable: dict[str, str],
         if declared:
             declarations.append(declared)
         cache[key] = {"score": score, "trace": result["trace"],
+                      "per_task_trials": per_task_trials.get(tid),
+                      "per_task_std": per_task_std.get(tid),
                       "harness_failed": failure,
                       "harness_output": harness_output.get(tid),
                       # The verdict travels with the score. Without this, a cached round
@@ -1376,7 +1569,18 @@ def _evaluate(repo: Path, tasks: list[dict], scorable: dict[str, str],
     if identity_variants:
         identity_declared = identity_variants[0]
 
-    return {"per_task": per_task, "traces": traces, "tampered": tampered,
+    #: The spread of the *run-level* score across trials: per trial, the mean over the
+    #: tasks measured in it. A reader comparing two harnesses needs this number, not the
+    #: per-task one, because the curve is drawn from run-level scores.
+    score_std = 0.0
+    if trials > 1 and per_task_trials:
+        width = min(len(v) for v in per_task_trials.values())
+        run_scores = [sum(v[i] for v in per_task_trials.values()) / len(per_task_trials)
+                      for i in range(width)]
+        score_std = _spread(run_scores)
+    return {"per_task": per_task, "per_task_std": per_task_std, "score_std": score_std,
+            "per_task_trials": per_task_trials, "trials": trials,
+            "traces": traces, "tampered": tampered,
             "verdicts": verdicts,
             "invalid": invalid,
             "harness_failed": harness_failed,

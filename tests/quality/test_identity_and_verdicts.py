@@ -204,3 +204,30 @@ def test_a_cached_round_still_explains_its_scores(tmp_path):
             assert e.get("kind"), f"round-{rnd} {e['task_id']}: 缓存命中后 kind 丢了"
             assert e.get("detail") is not None, (
                 f"round-{rnd} {e['task_id']}: 缓存命中后 detail 丢了")
+
+
+def test_the_point_names_the_skill_the_method_was_given(tmp_path, monkeypatch):
+    """**同一个人,不同的说明书。** `improver` 说"用了哪个工具",说不出"工具被告知了什么"。
+
+    实测:两次运行之间 `improvers/skill.md` 多了一条失败模式,方法名一样、improver 版本
+    一样,编辑不一样,而两份记录里没有一个字解释这件事 —— 这正是身份块存在的意义。
+    按调用读而不是 import 时缓存:平台可以在同一轮之内改自己的 skill。
+    """
+    import hashlib
+
+    from harnessgrad import identity
+
+    monkeypatch.setattr(identity, "PLATFORM_ROOT", tmp_path)
+    (tmp_path / "improvers").mkdir()
+    skill = tmp_path / "improvers" / "skill.md"
+    skill.write_text("# v1\n")
+    man = {"name": "probe", "version": "1"}
+    first = identity._identity(man, "sha", "A")
+    assert first["skill_sha"] == hashlib.sha256(b"# v1\n").hexdigest()
+
+    skill.write_text("# v2\n")
+    assert identity._identity(man, "sha", "A")["skill_sha"] != first["skill_sha"]
+
+    skill.unlink()
+    assert "skill_sha" not in identity._identity(man, "sha", "A"), \
+        "没有 skill 就不该报一个空文件的哈希"

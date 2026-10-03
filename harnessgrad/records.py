@@ -25,7 +25,7 @@ from harnessgrad.environments import _env_record
 from harnessgrad.methods import PlatformTampered
 
 def _cost_of(res: dict | None, n_tasks: int, wall_s: float,
-             method_claimed: int | None = None) -> dict:
+             method_claimed: int | dict | None = None) -> dict:
     """What this curve point cost, in the units a cost-aware method reasons about.
 
     `tokens` are the harness's own spend, read from its traces by the runner. They are
@@ -43,7 +43,16 @@ def _cost_of(res: dict | None, n_tasks: int, wall_s: float,
     good, so folding it into `harness_tokens` would feed a cost-aware acceptance rule a
     number its formula is not about. `None` when no service reported any, which is a
     different fact from zero.
+
+    `method_claimed` is the step's `claimed_cost` block when the caller has one, and a bare
+    number when it does not -- the trajectory has carried the split (input, output, calls,
+    model) since the method started reporting what its own provider said, and the single
+    number alone cannot answer why a round got expensive.
     """
+    claimed = method_claimed or {}
+    if isinstance(claimed, (int, float)):
+        claimed = {"generation_tokens": int(claimed)}
+    method_tokens = claimed.get("generation_tokens")
     tokens = (res or {}).get("tokens") or {}
     harness_tokens = None
     if tokens.get("tasks_reported"):
@@ -56,8 +65,15 @@ def _cost_of(res: dict | None, n_tasks: int, wall_s: float,
         "evaluation_trials": n_tasks if res else 0,
         # Kept because curves recorded before the runner read usage have it, and a
         # reader should not have to guess which field is authoritative.
-        "generation_tokens": method_claimed or 0,
-        "method_generation_tokens": method_claimed,
+        "generation_tokens": method_tokens or 0,
+        "method_generation_tokens": method_tokens,
+        # The improver's own split, from what its provider reported. `None` and not 0 when
+        # the method is older than this field or its endpoint reports no usage: "0 tokens
+        # in" is a claim, and a method that was not asked cannot make it.
+        "method_generation_input": claimed.get("method_input_tokens"),
+        "method_generation_output": claimed.get("method_output_tokens"),
+        "method_model_calls": claimed.get("method_model_calls"),
+        "method_model": claimed.get("method_model"),
         "harness_tokens": harness_tokens,
         "harness_tokens_reported_by_tasks": tokens.get("tasks_reported", 0),
         "harness_model_calls": tokens.get("calls"),
@@ -112,7 +128,8 @@ def _curve_point(*, run_id, round_index, identity, sampling, scores, task_ids,
                  split=None, env_record=None, invalid=None, harness_failed=None,
                  model_gateway=None, harness_runtime=None, hypothesis=None,
                  edits_applied=None, candidate_problems=None,
-                 side="train", evaluated_from=None) -> dict:
+                 side="train", evaluated_from=None,
+                 n_trials=None, score_std=None, per_task_std=None) -> dict:
     lo, hi = ci95(scores)
     return {
         "run_id": run_id, "round": round_index, "label": label,
@@ -155,6 +172,18 @@ def _curve_point(*, run_id, round_index, identity, sampling, scores, task_ids,
         # template.
         "edit_kind": None,
         "score": mean(scores), "score_ci95": [lo, hi],
+        # **How noisy this number is.** One evaluation per (harness, task) is one sample,
+        # and measured on this platform the *same* unmodified harness scored 0.333 in one
+        # run and 0.000 in the next -- the agent model intermittently emits a tool call the
+        # harness cannot parse and the task ends there. A curve that does not say how much
+        # of a difference is noise cannot support "this edit helped", which is the whole
+        # claim the platform exists to make. Present only when the run asked for more than
+        # one trial (`--trials`): absent means "one sample", not "no spread".
+        **({"n_trials": int(n_trials)} if n_trials and n_trials > 1 else {}),
+        **({"score_std": round(float(score_std), 6)}
+           if n_trials and n_trials > 1 and score_std is not None else {}),
+        **({"per_task_std": {k: round(float(v), 6) for k, v in (per_task_std or {}).items()}}
+           if n_trials and n_trials > 1 else {}),
         "per_task": dict(zip(task_ids, scores)),
         # How many tasks were scored, and how many of them earned full credit.
         #

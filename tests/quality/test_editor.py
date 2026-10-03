@@ -485,3 +485,81 @@ def test_a_prompt_without_pages_still_builds(tmp_path):
     root = _write_harness(tmp_path / "base")
     prompt = mod.build_prompt(root, {"round_index": 1, "incumbent_score": 0.0})
     assert "## Current harness sources" in prompt and "no_change" in prompt
+
+
+# --------------------------------------------- 方法自己的 token 进 cost ---
+
+def test_the_methods_own_tokens_reach_the_cost_record(tmp_path, monkeypatch):
+    """**实测过的 0。** 方法自己调模型的 token 以前永远是 0。
+
+    平台早就有 `cost.method_generation_tokens` 这个字段,README 里也写着成本是三个账本
+    (harness / method / env)。但它一直是 0 —— 不是"方法没花钱",而是**没人把数传下来**:
+    `editor.ask` 拿到的 `usage` 在函数返回时就没了,`report(tokens=)` 默认 0,而每个方法
+    都得自己记得传。一个读常数的成本规则允许一切,所以这不是美化字段,是修一条规则。
+
+    这条测试同时钉住"观测"和"声明"两件事:重试那次失败的调用也要算钱。
+    """
+    import editor
+
+    monkeypatch.setenv("HG_METHOD_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("HG_METHOD_API_KEY", "x")
+    monkeypatch.setenv("HG_METHOD_MODEL", "m")
+    monkeypatch.setenv("HG_METHOD_PARSE_RETRIES", "2")
+
+    class _Usage:
+        prompt_tokens, completion_tokens, model = 900, 100, "m-real"
+
+    class _Resp:
+        model = "m-real"
+        usage = _Usage()
+
+        def __init__(self, text):
+            self.choices = [type("C", (), {"message": type("M", (), {"content": text})()})()]
+
+    # 第一次读不懂,第二次成功 —— 两次都花了钱。
+    replies = ["嗯…这个", '{"no_change": "算了"}']
+
+    class _Completions:
+        def create(self, **kw):
+            return _Resp(replies.pop(0))
+
+    class _Client:
+        def __init__(self, **kw):
+            self.chat = type("C", (), {"completions": _Completions()})()
+
+    import openai
+    monkeypatch.setattr(openai, "OpenAI", _Client)
+
+    editor.reset_spent()
+    reply = editor.ask("prompt")
+    assert reply == {"no_change": "算了"}
+    assert replies == [], "第二次调用必须真的发生,否则这条测试没在测重试"
+    assert editor.spent() == {"input": 1800, "output": 200, "calls": 2,
+                              "model": "m-real"}
+
+    emitted = []
+    monkeypatch.setattr(editor, "emit", emitted.append)
+    req = {"workspace": str(tmp_path), "trajectory_out": str(tmp_path / "traj.json")}
+    editor.report(req, method="probe", harness_dir=tmp_path, changed=False,
+                  hypothesis="算了")
+    assert emitted[-1]["generation_tokens"] == 2000, emitted[-1]
+    assert emitted[-1]["method_usage"]["calls"] == 2
+    traj = json.loads((tmp_path / "traj.json").read_text())
+    claimed = traj["steps"][0]["claimed_cost"]
+    assert claimed["generation_tokens"] == 2000
+    assert (claimed["method_input_tokens"], claimed["method_output_tokens"]) == (1800, 200)
+    assert claimed["method_model_calls"] == 2
+    assert claimed["method_model"] == "m-real"
+
+
+def test_a_method_that_made_no_call_reports_a_real_zero(tmp_path, monkeypatch):
+    """显式传 0 仍然是 0 —— 参考方法 `echo_base` 不改 harness、不调模型,这是事实不是缺省。"""
+    import editor
+
+    emitted = []
+    monkeypatch.setattr(editor, "emit", emitted.append)
+    editor.reset_spent()
+    editor.report({"workspace": str(tmp_path)}, method="echo_base", harness_dir=tmp_path,
+                  changed=False, hypothesis="no change", tokens=0)
+    assert emitted[-1]["generation_tokens"] == 0
+    assert emitted[-1]["method_usage"]["calls"] == 0
