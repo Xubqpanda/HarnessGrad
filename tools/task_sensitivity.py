@@ -57,6 +57,7 @@ sys.path.insert(0, str(ROOT))
 
 from ckpt.git_state import commit_state, stage_workspace          # noqa: E402
 from data import registry                                          # noqa: E402
+from driver import load_env                                        # noqa: E402
 from eval.console import CONSOLE as console                         # noqa: E402
 from eval.runner import evaluate                                    # noqa: E402
 from harnessgrad.records import _require_untampered                 # noqa: E402
@@ -203,9 +204,16 @@ def render_table(stats: list[dict], harnesses: list[str]) -> str:
 
 def _measure(specs: list[tuple[str, Path]], tasks: list[dict], scorable: dict,
              setups: dict, verifiers: dict, envs: dict, args, work_root: Path,
-             run_dir: Path, cache: dict) -> dict[str, dict[str, float | None]]:
-    """Run every (harness, task) pair through the platform and collect the scores."""
+             run_dir: Path, cache: dict) -> tuple[dict[str, dict[str, float | None]], dict]:
+    """Run every (harness, task) pair through the platform and collect the scores.
+
+    Returns `(scores, invalid)`. A cell the platform could not measure is `None` in
+    `scores` **and** keeps its reason in `invalid`, because "four of six tasks came back
+    invalid" is the finding of a study like this one, and dropping the receipts is how the
+    first version of this tool reported "every task undefined" without saying why.
+    """
     scores: dict[str, dict[str, float | None]] = {t["task_id"]: {} for t in tasks}
+    invalid: dict[str, dict] = {}
     for label, path in specs:
         work = work_root / f"hs-{label}"
         stage_workspace(path, work)
@@ -220,12 +228,26 @@ def _measure(specs: list[tuple[str, Path]], tasks: list[dict], scorable: dict,
         _require_untampered(res)
         for tid, value in (res.get("per_task") or {}).items():
             scores.setdefault(tid, {})[label] = float(value)
-        for tid in (res.get("invalid") or {}):
+        for tid, why in (res.get("invalid") or {}).items():
             scores.setdefault(tid, {})[label] = None
+            invalid[f"{label}/{tid}"] = why
+        if res.get("invalid"):
+            # Named, per harness, because 4-of-6 invalid is not a footnote -- it is the
+            # reason the correlation below is undefined, and the reader needs it there.
+            console.note(f"  {label}: INVALID cells — " + "; ".join(
+                f"{tid}: {str(why.get('detail'))[:90]}"
+                for tid, why in sorted((res.get("invalid") or {}).items())[:3]),
+                level="warn")
         console.note(f"  {label}: {len(res.get('per_task') or {})} measured, "
                      f"{len(res.get('invalid') or {})} invalid, "
                      f"{time.time() - t0:.0f}s")
-    return scores
+        if args.cache:
+            # After every harness, not at the end: this is a paid measurement and an
+            # interrupted run must not lose the cells it already bought. (Measured on the
+            # first run of this tool: the cache was written in a `finally`, so a kill at
+            # harness five would have thrown away five harnesses of evaluations.)
+            Path(args.cache).write_text(json.dumps(cache, indent=1))
+    return scores, invalid
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -249,6 +271,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-sandbox", dest="sandbox", action="store_false")
     ap.set_defaults(sandbox=True)
     args = ap.parse_args(argv)
+
+    # **The same `.env` a run gets.** Measured, and it cost a whole measurement: without
+    # this, `HG_EGRESS_PROXY` never reached the check phase, 4-5 of 6 Terminal-Bench tasks
+    # came back `invalid` (their checks install their own runner over the network), and the
+    # first version of this tool dropped those receipts on the floor and reported "every
+    # task undefined". Real environment variables still win (`load_env` uses setdefault), so
+    # an explicit `HG_AGENT_MODEL=... python3 tools/task_sensitivity.py` overrides the file.
+    load_env(ROOT / ".env")
 
     specs: list[tuple[str, Path]] = []
     for item in args.harnesses.split(","):
@@ -299,12 +329,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"warning: {args.cache} is not readable JSON; starting with an empty "
                   f"cache", file=sys.stderr)
 
-    try:
-        scores = _measure(specs, tasks, scorable, setups, verifiers, envs, args,
-                          work_root, run_dir, cache)
-    finally:
-        if args.cache:
-            Path(args.cache).write_text(json.dumps(cache, indent=1))
+    scores, invalid = _measure(specs, tasks, scorable, setups, verifiers, envs, args,
+                               work_root, run_dir, cache)
 
     stats = analyse(scores)
     # What each harness scored overall, so a reader can see the quality range the
@@ -327,6 +353,9 @@ def main(argv: list[str] | None = None) -> int:
         "seed": args.seed,
         "harnesses": harness_rows,
         "tasks": stats,
+        # Every cell the platform could not measure, with its stage and wording. A study
+        # whose cells are 80% invalid has that as its result; the record has to say so.
+        "invalid_cells": invalid,
         "summary": {
             "sensitive": [s["task_id"] for s in stats if s["status"] == "sensitive"],
             "insensitive": [s["task_id"] for s in stats if s["status"] == "insensitive"],
@@ -339,6 +368,15 @@ def main(argv: list[str] | None = None) -> int:
     out = Path(args.out) if args.out else run_dir / "sensitivity.json"
     out.write_text(json.dumps(result, indent=1))
     print(render_table(stats, [label for label, _ in specs]))
+    if invalid:
+        by_stage: dict[str, int] = {}
+        for why in invalid.values():
+            stage = str(why.get("stage") or "?")
+            by_stage[stage] = by_stage.get(stage, 0) + 1
+        print("\ninvalid cells: " + ", ".join(f"{n} at stage {k!r}"
+                                              for k, n in sorted(by_stage.items())))
+        for key, why in list(sorted(invalid.items()))[:3]:
+            print(f"  {key}: {str(why.get('detail'))[:140]}")
     s = result["summary"]
     print(f"\nsensitive {len(s['sensitive'])} · insensitive {len(s['insensitive'])} · "
           f"undefined {len(s['undefined'])}")

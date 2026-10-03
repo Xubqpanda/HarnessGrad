@@ -210,15 +210,13 @@ with the gateway's own connection counts in the reason.
 Stated plainly, because a comparison that lists only advantages is not a
 comparison.
 
-1. **Task construction for harness sensitivity -- Evo-Bench's real contribution.**
-   73 harness variants evolved on a disjoint 320-task auxiliary set, 12 diverse
-   harnesses `H_aux`, then `Sens(x)` = the Pearson correlation between a task's
-   score across harnesses and each harness's leave-one-task-out quality; tasks with
-   `Sens(x) ≤ 0` are dropped, the rest are stratified by difficulty and split so
-   validation and evaluation follow the same difficulty distribution (Abstract, §3).
-   Our split is whatever the dataset declares (`terminal_bench`: 52 train / 37
-   eval). **They can show a task set responds to harness quality; we cannot.** This
-   is the single most valuable thing to borrow.
+1. ~~**Task construction for harness sensitivity.**~~ **Borrowed -- see §6.** Their
+   construction (73 variants on a disjoint auxiliary set, 12 diverse harnesses,
+   `Sens(x)` correlated against each harness's leave-one-task-out quality, then a
+   difficulty-stratified split) is now implemented as `tools/task_sensitivity.py`, and
+   the first measurement on six of our tasks is in §6. What we still do not have is
+   their *scale*: 12 harnesses evolved by four frontier models against our six states
+   off disk, and a task set large enough for the resulting split to be the split.
 2. **Scale and suite coverage.** 2,207 instances across 5 suites (HarnessDev),
    608 tasks (Evo-Bench), 106 tasks × 54 configurations (Harness-Bench), 150 tasks ×
    27 configurations (PawBench). Ours is 89 Terminal-Bench tasks and one demo set.
@@ -272,3 +270,89 @@ leaderboard (HarnessBench, PawBench). What is ours, and is checkable:
 > process, noise and identity and cost and "could not measure" on every point --
 > and then ask whether the improvement **policy itself** can be trained, which the
 > platform's own verifiable reward makes testable rather than anecdotal.
+
+---
+
+## 6. What we borrowed, and what it measured
+
+Two of the gaps in §4 are now closed, and the second one produced a finding about our
+own task set.
+
+### 6.1 `candidate_code` -- HarnessDev's dead-code diagnostics
+
+Every point a method produced now carries what the candidate *is*, as code
+(`harnessgrad/code_metrics.py`, contract in `INTERFACE.md` §3.1): file and definition
+counts, the modules not reachable from the entrypoint's transitively resolved imports,
+and the module-level definitions no one names. On our single-file reference harness the
+reading is trivial (1 file, 9 functions, 0 unreferenced) -- which is the correct answer,
+and the field earns its place the first time a method appends a module nobody imports.
+It is recorded for rejected candidates too, because "what did the method actually do" is
+asked hardest about a candidate that never ran. Eleven tests, including an end-to-end
+run in which a method plants a dead function and an orphan module and both have to appear
+on the point -- and on which H0's point must *not* have the field, because H0 is not a
+candidate.
+
+### 6.2 Task sensitivity -- Evo-Bench's construction, on our tasks
+
+`tools/task_sensitivity.py` implements their definition: `Perf(x)` is a task's mean score
+across harnesses, `quality(h | x)` is harness `h`'s mean over the *other* tasks, and
+`Sens(x)` is the Pearson correlation of the two across harnesses. Three readings are kept
+apart -- sensitive, insensitive, and `undefined` (the task's score does not vary across the
+harnesses that ran, so there is nothing to correlate) -- and a cell the platform could not
+measure is dropped and counted, never filled with a zero. The split is deterministic from a
+recorded seed, and a difficulty band with two or more kept tasks feeds both sides by
+construction.
+
+**The measurement.** Six harnesses we already had on disk (the reference, its `loop_plain`
+and `loop_rrsi_parse` variants, and the round states three previous runs actually reached)
+× six Terminal-Bench tasks, one evaluation per cell, 36 cells, every one measured:
+
+| task | base | plain | rrsi | flash-a | flash-b | eigen | perf | Sens | status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| break-filter-js-from-html | 0 | 0 | 0 | 0 | **1** | 0 | 0.17 | **+0.79** | sensitive |
+| build-pmars | 0 | 0 | 0 | **1** | **1** | 0 | 0.33 | **+0.66** | sensitive |
+| prove-plus-comm | 0 | 0 | 0 | **1** | **1** | **1** | 0.50 | **+0.33** | sensitive |
+| cancel-async-tasks | **1** | 0 | 0 | 0 | **1** | 0 | 0.33 | +0.22 | sensitive |
+| largest-eigenval | 0 | **1** | 0 | 0 | 0 | 0 | 0.17 | **-0.43** | insensitive |
+| chess-best-move | 0 | 0 | 0 | 0 | 0 | 0 | 0.00 | n/a | undefined |
+
+Harness quality across the six tasks: `rrsi` 0.000, `base`/`plain`/`eigen` 0.167,
+`flash-a` 0.333, `flash-b` 0.667 -- a real range, and note that the *variant we built as a
+parse-hardening exercise* (`rrsi`) is the worst of the six, below the unmodified base.
+
+What the table says, stated no more strongly than six harnesses and six tasks allow:
+
+* **Four of six tasks do respond to harness quality**, and they are the ones our earlier
+  experiments had already used by hand. The tool reproduces that known signal, which is the
+  sanity check that matters most.
+* **`chess-best-move` is zero-information for this harness set**: 0/6, every harness, every
+  time -- `undefined`, not "hard". It sits in our declared *train* side and it has cost a
+  full 900 s agent timeout in more than one run. A task no harness solves cannot separate
+  two harnesses, and the honest place for that reading is the record, not a footnote.
+* **`largest-eigenval` is anti-correlated** (`-0.43`): the only harness that solves it is
+  `plain`, the weakest of the six. This is either a task that rewards something other than
+  what the rest of the set measures, or noise at n=6. Both readings are reasons not to put
+  it on the exam side without more harnesses.
+* **`cancel-async-tasks` is nominally sensitive but non-monotone**: the unmodified base
+  solves it, `flash-a` (quality 0.333) does not, `flash-b` (0.667) does. With binary
+  outcomes and n=6, `+0.22` is weak evidence, and the table shows why -- not the summary
+  number, which is exactly why the per-cell columns are in the report.
+
+**The mistake this run caught, and the fix.** The first version of this tool reported
+*every* task `undefined`, and the reason was one line up: 4-5 of every 6 cells were
+`invalid`. The tool had never loaded `.env`, so `HG_EGRESS_PROXY` did not reach the check
+phase, and 83-of-89 Terminal-Bench checks -- the ones that install their own runner over
+the network -- could not run. With `.env` loaded: 36/36 cells measured. Three defects came
+out of it and are now fixed: `.env` is loaded the way `driver.py` loads it (real
+environment variables still win), every `invalid` cell keeps its stage and wording in the
+report, and the cache is written after each harness rather than at the end (this is a paid
+measurement; an interrupted study must not lose the cells it already bought). *The
+platform's configuration is part of the measurement* -- a study that bypasses the
+entrypoint's configuration does not measure the platform, it measures a task set where
+nothing works.
+
+**Still open, and worth doing next:** the same measurement over the whole declared eval side
+(37 tasks) against three or four harnesses would replace our declared 52/37 split with a
+measured one. On this evidence that would drop at least one zero-information task from the
+train side and put the anti-correlated one under scrutiny -- but a six-task study cannot do
+that on its own, and the tool is deliberately explicit about how few harnesses it had.
