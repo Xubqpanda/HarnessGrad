@@ -118,6 +118,15 @@ def _method_sandbox_plan(work: Path, argv: list[str], scratch: Path,
         # platform" and binds it read-only -- so leaving this out handed the platform
         # straight back. Measured: with `repo` omitted, a probe method still read
         # `data/probe_set.py` and `.env`, and the sandbox looked like it was working.
+        #
+        # **A known footgun, measured, not fixed: a method script that lives in `/tmp`
+        # cannot write its candidate.** The scratch is `/tmp/hg-method-<run>-<rand>/`, and
+        # a script named by an absolute path has its own directory bound read-only -- so
+        # when that directory is `/tmp`, the read-only bind lands on top of the writable
+        # scratch (later mounts win) and the method dies with `OSError: [Errno 30]
+        # Read-only file system: .../round1_ws/next`. Real methods live in the repository
+        # or in the author's project, so this only bit a demo script; the fix, when someone
+        # has one, is to bind the scratch *last* rather than to stop binding the ancestor.
         # The first element of `readonly` is the method's own read-only input tree.
         "repo": (readonly[0] if readonly else Path(argv[0]).resolve().parent),
         "visible_paths": tuple(dict.fromkeys(visible)),

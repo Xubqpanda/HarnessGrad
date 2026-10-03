@@ -994,6 +994,7 @@ async function showRun(id){
         <td>${p.round}</td><td><b>${fmt(p.score)}</b></td>
         <td>${passed}/${n}</td>
         <td>${files?files+' 个文件':'<span class="dim">'+(p.method_reported&&p.method_reported.error?'失败':'无改动')+'</span>'}</td>
+        <td>${p.round===0?'<span class="dim">基线</span>':codeCell(p)}</td>
         <td><code>${esc(String(idn.harness_sha||'').slice(0,10))}</code></td></tr>`;
     }).join('');
   }
@@ -1174,7 +1175,7 @@ async function showStep(i){
   const fails=Object.keys(per).filter(t=>per[t]<1);
   let html=`<div class="row" style="justify-content:space-between;margin-bottom:6px">
     <b>step ${p.round}</b>
-    <span class="hint">得分 ${fmt(p.score)} · 区间 [${(p.score_ci95||[]).map(x=>Number(x).toFixed(2)).join(', ')}]
+    <span class="hint">得分 ${fmt(p.score)}${p.n_trials?` · ${p.n_trials} 次/题 ±${Number(p.score_std||0).toFixed(3)}`:''} · 区间 [${(p.score_ci95||[]).map(x=>Number(x).toFixed(2)).join(', ')}]
     · 通过 ${Object.keys(per).length-fails.length}/${Object.keys(per).length}</span></div>`;
   if(fails.length) html+=`<div class="hint">未通过:${fails.map(esc).join(', ')}</div>`;
   html+=`<div class="row" style="margin:8px 0">
@@ -1218,8 +1219,11 @@ async function showStep(i){
   } else {
     cells.push(['improver','未记录','这个方法自带改进器,或本机解析不到']);
   }
+  // skill 的哈希跟 method 写在一起:它是"方法被告知了什么",和"方法是谁"是两件事,
+  // 但都是同一格要回答的问题(improver 是"谁动手改了")。
   cells.push(['method', p.label?esc(String(p.label).slice(0,60)):'—',
-    esc(id.method_model||'—')]);
+    esc(id.method_model||'—')
+    + (id.skill_sha?` · skill <code>${esc(String(id.skill_sha).slice(0,8))}</code>`:'')]);
   html+=`<div class="split" style="margin:12px 0">`
     + cells.map(([k,v,s])=>`<div class="cell"><h4>${k}</h4><div class="v">${v}</div>`
         + `<div class="s">${s}</div></div>`).join('')
@@ -1245,6 +1249,23 @@ async function explain(round){
   if(r.error){ $('#expl-status').innerHTML='<span class="bad">'+esc(r.error)+'</span>'; return; }
   $('#expl-status').innerHTML='<span class="ok">由 '+esc(r.model)+' 生成</span>';
   $('#expl-box').innerHTML=`<div class="expl">${esc(r.explanation)}</div>`;
+}
+
+// 候选 harness「作为代码」的读数(HarnessDev 的测量):只有方法交出的那一轮才有这个字段。
+// **诊断,不是分数** —— 所以它出现在这张表里,不出现在曲线上。一个永不执行的死函数
+// 在 diff 里、在 token 计数里、在"这轮改了几个文件"里都像工作。
+function codeCell(p){
+  const c=p.candidate_code;
+  if(!c) return '<span class="dim">—</span>';
+  if(c.language!=='python') return `<span class="dim">${esc(c.language)}</span>`;
+  const dead=(c.unreferenced||[]), orphan=(c.unreachable_modules||[]);
+  if(!dead.length && !orphan.length) return '<span class="dim">干净</span>';
+  const names=dead.map(u=>u.name).slice(0,8).join(', ');
+  const title=esc(`未引用: ${names||'—'} | 不可达模块: ${orphan.join(', ')||'—'}`);
+  const parts=[];
+  if(dead.length) parts.push(`<span class="bad">${dead.length} 无调用者</span>`);
+  if(orphan.length) parts.push(`<span class="bad">${orphan.length} 不可达</span>`);
+  return `<span title="${title}">${parts.join(' · ')}</span>`;
 }
 
 // ---------- 历史 ----------
