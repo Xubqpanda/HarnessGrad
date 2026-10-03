@@ -1186,7 +1186,8 @@ spread, `jobs` buys wall clock.
   87.8% of a measured three-task run's wall clock (2578 s of 2936 s) was the harness's own
   agent loop, with the platform idle for all of it.*
 
-Three more fields exist so that two runs can be told apart at all:
+Four more fields exist so that two runs can be told apart at all -- and one of them, the
+last, is not about telling runs apart but about telling *candidates* apart:
 
 * **`identity.skill_sha`** — sha256 of the platform skill the method was offered
   (`improvers/skill.md`), read when the point is written. `improver` says which tool composed
@@ -1204,6 +1205,17 @@ Three more fields exist so that two runs can be told apart at all:
   error` and a harness whose model endpoint hung up on an idle keep-alive connection are the
   same string from inside the container and different facts about the measurement.* A
   harness that dies that way is `invalid` with `stage: "harness model call"` — never `0.0`.
+* **`candidate_code`** — what the method handed over, *as code*: file and definition counts,
+  the modules not reachable from the entrypoint's import closure, and the module-level
+  definitions no one names (`harnessgrad/code_metrics.py`, `kind: "python-static-v1"`).
+  Present on a round where a method produced a candidate, absent on H0 and on an eval run,
+  because neither handed one over. *Reason, measured by HarnessDev on their own evolved
+  harnesses: "of 169 new functions or classes, 113 are reachable from the entry point, 31 are
+  reachable only through dead code, and 25 have no caller" (§4.3). Without this field,
+  this platform scores a candidate that appended 25 uncalled functions exactly like one that
+  changed nothing — and dead code looks like work in a diff, in a token count, and in "14
+  edits this round".* It is a **diagnostic and never a score**: static, Python-only,
+  name-based, with the three ways it is wrong written at the top of that module.
 
 ---
 

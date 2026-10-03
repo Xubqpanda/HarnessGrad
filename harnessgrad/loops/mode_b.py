@@ -26,6 +26,7 @@ from ckpt.git_state import reset_hard
 from eval.console import CONSOLE as console
 from eval.runner import evaluate
 from harnessgrad import PLATFORM_API_VERSION
+from harnessgrad import code_metrics
 from harnessgrad.channel import _stage_for_method
 from harnessgrad.environments import _env_record
 from harnessgrad.environments import _report_harness_failed
@@ -248,6 +249,11 @@ def _run_mode_b(args, work, man, run_id, mode, curve, h0_sha, run_dir, base,
         point["edit_kind"] = step.get("edit_kind")
         point["measured_by_platform"] = res is not None
         point["verifier_kinds"] = verifier_kinds
+        # The same diagnostic as mode A (see the note there): what the method handed over,
+        # as code. Measured on `work`, which is where the candidate was copied to, and on
+        # the rejected path too -- a candidate that does not validate is exactly when
+        # someone asks whether the method wrote anything that could ever run.
+        point["candidate_code"] = code_metrics.measure(work)
         if res is None:
             # Named problems, not "no harness.json": a candidate can be rejected for a
             # manifest that no longer parses, an entrypoint that is gone, Python that does

@@ -26,6 +26,7 @@ from ckpt.git_state import reset_hard
 from eval.console import CONSOLE as console
 from eval.runner import evaluate
 from harnessgrad import PLATFORM_API_VERSION
+from harnessgrad import code_metrics
 from harnessgrad.channel import _stage_for_method
 from harnessgrad.environments import _env_record
 from harnessgrad.environments import _report_harness_failed
@@ -339,6 +340,18 @@ def _run_mode_a(args, work, man, run_id, mode, curve, h0_sha, base, tasks,
         # the method-facing page quotes as "what moved this round".
         point["editable_surface_touched"] = _touched_paths(
             work, curve[-1]["identity"]["harness_sha"], sha)
+        # **What the candidate is, as code.** HarnessDev measured this on the harnesses
+        # their creators wrote: "of 169 new functions or classes, 113 are reachable from
+        # the entry point, 31 are reachable only through dead code, and 25 have no caller"
+        # (§4.3). Without it, a candidate that appended 25 uncalled functions scores
+        # exactly like one that changed nothing -- and dead code that never runs looks
+        # like work in a diff, in a token count, and in "14 edits this round". Recorded
+        # from the tree the platform is about to measure, including when the candidate was
+        # rejected (`src` is set before validation), because "what did the method actually
+        # do" is the question a rejected candidate raises. A diagnostic, never a score:
+        # `harnessgrad/code_metrics.py` states the three ways static analysis is wrong.
+        if src:
+            point["candidate_code"] = code_metrics.measure(Path(src))
         curve.append(point)
         _write_curve(run_dir / "curve.jsonl", curve)
         # The step finished both phases, so it counts -- and the next step starts with a
