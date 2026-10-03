@@ -38,6 +38,7 @@ decision rule, with this platform's loop and whichever improver the run resolved
 | AHE | arXiv 2604.25850 (`china-qijizhifeng/agentic-harness-engineering`) | pre-registration, component-level attribution (5 verdicts), pivot-after-two, a real rollback |
 | HarnessX | arXiv 2606.14249 (`darwin-agent/HarnessX`) | the acceptance gate (historical best, tolerance, passed-count noise guard, cost penalty) and the pre-registration |
 | TTHE | arXiv 2607.08124 (`junnie00/TTHE`) | fixed branch-role schedule, validity gate, proposal card, "the incumbent is always acceptable" |
+| Meta-Harness | arXiv 2603.28052 (`stanford-iris-lab/meta-harness`) | the frontier rule: a **per-task** best map plus an overall best, the base choice that implies, and the evolution-summary row (declared hypothesis beside its measured delta) |
 | codex | -- | not a paper method: the improver moved *out* of the method (an external coding agent), so that a rule and a tool can vary independently |
 | `llm_improver`, `echo_base`, `noop` | this platform | the shared diagnose-and-edit loop; a contract self-test; the floor every curve must beat |
 
@@ -52,8 +53,10 @@ One adapted method has **no port at all**, and one has no port *yet*:
   `travels_with_artifact: False`. There is nothing to port.
 * **Meta-Harness** is two repositories, and this project spent months reading only the
   first: the *artifact* (the paper's optimized TB2 harness) is not compilable here, but
-  the *process* lives in a second repo that carries the search loop. **This section used
-  to say the process was never released, which was false.** Corrected in §6.
+  the *process* lives in a second repo that carries the search loop. **An earlier version
+  of this section said the process was never released, which was false.** It is now the
+  eighth port -- `methods/meta_harness/run.py`, 15 tests, and the real-call validator
+  passes. See §6.
 
 ---
 
@@ -303,7 +306,7 @@ is not the same as being finished (`INTERFACE.md`, §`stop`) -- and the sentence
 
 ---
 
-## 6. Meta-Harness: an output we adapted, a process we missed, and a port candidate
+## 6. Meta-Harness: an output we adapted, a process we missed, and the eighth port
 
 **The correction first, because an earlier version of this file said the opposite.**
 Meta-Harness is two repositories:
@@ -371,19 +374,39 @@ already know about:
 | proposer | Claude Code, with tools, 40-minute timeout | the shared single-turn `editor`, unless the run resolves an agentic improver (codex) |
 | gate | validate import + smoke test on one task **before** the evaluation | mode A cannot smoke-test: a candidate that is handed over *is* evaluated. The gate can only move to "do not spend this round" |
 
-### What a port would take
+### The port (2026-10-04)
 
-Not written yet, and worth doing, in this order: (1) the **frontier** as a record
-(`method_reported.meta_harness_frontier` with the per-task map and the overall best) plus a
-directive naming which staged state the next round should build on -- the same degradation
-HarnessX's revert suffers from, because mode A cannot let a method reject a measured
-candidate; (2) the **validate + smoke gate** as a pre-spend decision, which needs a cheap
-"does this candidate even import" check the platform can run without a full evaluation --
-today the platform's own `candidate.validate` does that after the method has already spent
-its model call, so a port would have to reimplement the cheap half inside the method;
-(3) the **candidate row** (`hypothesis`, `changes`, measured `delta` against the best),
-most of which this platform already records as `hypothesis`, `edits_applied` and the curve
-point itself.
+`methods/meta_harness/run.py`, with `tests/quality/test_meta_harness_rule.py` (15 tests) and
+a passing real-call `tools/validate_method.py methods/meta_harness`.
+
+* **`frontier_of` / `update_frontier`** build the per-task best map and `_best` from the
+  platform's curve points, keeping the original's strict `>` so a tie never dethrones the
+  earliest holder. `_best` keeps its name; the per-task entries are nested under `tasks`
+  rather than sitting at the top level beside it, because in `frontier_val.json` a task id
+  *is* a top-level key and a task named `_best` would corrupt the file.
+* **`candidate_row`** writes the evolution-summary row from a curve point: the declared
+  `hypothesis` (`method_hypothesis`), the `changes` (`edits_applied`), `avg_pass_rate` and
+  `per_task` from `protocol.studied_*`, and `delta` against the frontier *after* this
+  candidate was folded in -- the original's ordering, which is why a new best reports 0.
+* **`base_round`** makes the frontier executable: this round edits the overall best **staged**
+  state instead of the incumbent, resolving it through `states/index.json` rather than
+  guessing a path. The **channel stays the incumbent's** -- traces, task pages and `SKILL.md`
+  live in `_harnessgrad/`, and a staged state is a harness commit with no channel in it, so
+  reading the prompt's traces from the edit base would show the proposer nothing on exactly
+  the rounds where the frontier moved.
+* **`validity_gate`** is the honest mapping of their validate + smoke gate. The *validate*
+  half is the platform's (`eval/candidate.validate`, which runs before the expensive
+  evaluation); the *smoke* half does not exist here, because a method cannot run a harness --
+  the candidate it hands over is the thing the platform measures, on the whole studied side.
+  What the port can check before spending is that there is failure evidence at all; a studied
+  side where every task already passes declines the round with `changed: false, stop=False`.
+* The **prompt** is the thesis: the frontier table plus every prior candidate's row, not just
+  the last round's traces.
+
+**One platform gap this port makes concrete, and does not close:** a cheap subset evaluation
+between proposal and the full studied side -- their one-task smoke test. Adding it would mean
+the platform could refuse a candidate for one task's cost instead of the whole side's, which
+is the single most expensive thing mode A does per round.
 
 Two honest notes about scale. Their default run is 89 tasks × 2 trials at concurrency 50 on
 Opus 4.6, with the release note *"It has not been tested beyond verifying that it runs"* --

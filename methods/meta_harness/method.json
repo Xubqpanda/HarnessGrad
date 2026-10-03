@@ -1,0 +1,5 @@
+{
+ "kind": "published",
+ "title": "Meta-Harness:每题 frontier,和更宽的历史",
+ "note": "移植的是它的 frontier 规则(`update_frontier`):**每题**记录最佳候选与通过率,外加总体最佳;下一轮建在总体最佳那个**已 staged** 的状态上。proposer 读的是**所有**历史候选的源码、分数和 trace(不只是上一轮),这是它论文的主张所在。原实现的 validate+smoke 门带不过来(mode A 交出去的候选就是被测对象,方法不能先单题试跑),Claude Code 的工具面也换成了共用 editor;它的搜索集与报告集是同一批 89 题,我们分开。见 docs/methods_we_port.md §6。"
+}
