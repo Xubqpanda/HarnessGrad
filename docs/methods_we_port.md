@@ -41,7 +41,7 @@ decision rule, with this platform's loop and whichever improver the run resolved
 | codex | -- | not a paper method: the improver moved *out* of the method (an external coding agent), so that a rule and a tool can vary independently |
 | `llm_improver`, `echo_base`, `noop` | this platform | the shared diagnose-and-edit loop; a contract self-test; the floor every curve must beat |
 
-Two adapted methods have **no port**, and the reasons are different in kind:
+One adapted method has **no port at all**, and one has no port *yet*:
 
 * **MAC** (`ant-research/meta-agent-challenge`) *is a platform*. It ships an evaluation
   API, a sandbox, a cryptographic held-out split and a budget, and it puts a general
@@ -50,7 +50,10 @@ Two adapted methods have **no port**, and the reasons are different in kind:
   lives in the (unpublished) meta-agent it calls. And its evaluation discipline does not
   travel with the artifact: `adapters/mac.py:54-61` records
   `travels_with_artifact: False`. There is nothing to port.
-* **Meta-Harness** publishes an **output**, not a process. See §6.
+* **Meta-Harness** is two repositories, and this project spent months reading only the
+  first: the *artifact* (the paper's optimized TB2 harness) is not compilable here, but
+  the *process* lives in a second repo that carries the search loop. **This section used
+  to say the process was never released, which was false.** Corrected in §6.
 
 ---
 
@@ -300,44 +303,94 @@ is not the same as being finished (`INTERFACE.md`, §`stop`) -- and the sentence
 
 ---
 
-## 6. Why Meta-Harness has no port, and where it would belong instead
+## 6. Meta-Harness: an output we adapted, a process we missed, and a port candidate
 
-Meta-Harness (`stanford-iris-lab/meta-harness-tbench2-artifact`) releases **five files**: a
-README, `agent.py`, a prompt template, a caching helper and a `pyproject.toml`. Its README
-describes what it is in one paragraph: the agent "extends the Terminus-KIRA agent with
-environment bootstrapping" -- before the agent loop starts it gathers a snapshot of the
-sandbox (working directory, file listing, languages, package managers, memory) and injects it
-into the initial prompt, saving the first few exploration turns. Then: *"The agent was
-discovered through automated harness evolution. More details coming soon."*
+**The correction first, because an earlier version of this file said the opposite.**
+Meta-Harness is two repositories:
 
-Two independent reasons it cannot be a method here:
+* `stanford-iris-lab/meta-harness-tbench2-artifact` -- the **output**: five files (a README,
+  `agent.py`, a prompt template, a caching helper, `pyproject.toml`), the paper's optimized
+  Terminal-Bench 2 harness, "76.4% on Terminal-Bench 2.0 (Claude Opus 4.6)".
+* `stanford-iris-lab/meta-harness` -- the **process**: "Official code for Meta-Harness
+  (2603.28052)", created 2026-04-15, pushed 2026-10-02, 1,634 stars, MIT. It carries the
+  framework, two reference experiments and the search loop:
+  `reference_examples/terminal_bench_2/meta_harness.py` (34 KB, the TB2 loop),
+  `reference_examples/text_classification/` (memory-system search),
+  `experimental/harbor_meta_harness/controller.py`, and an `ONBOARDING.md` whose flow
+  produces a `domain_spec.md` for a new domain.
 
-1. **There is no rule to port.** Searched over every published file, the words `score`,
-   `verifier`, `reward`, `search`, `evolve`, `candidate`, `accept`, `select`, `mutat` and
-   `benchmark` occur **zero** times. There is no acceptance statistic, no cost rule, no
-   novelty term, no budget, no critic, no parent rule. The search process that produced it is
-   not in the release.
-2. **It is not a self-contained harness either.** Its interface is
-   `run(instruction, environment: BaseEnvironment, context: AgentContext)`: the environment
-   is a first-class argument, and its contribution *is* running commands inside that sandbox.
-   Synthesizing a `BaseEnvironment` from a working directory is not possible -- it is
-   harbor's sandbox abstraction -- so the adapter records
-   `measurable_by_platform: false`, `trajectory_shape: single_point`, and
-   `adapters/metaharness.py` says plainly that this one "needs to BE the agent inside
-   harbor's sandbox".
+This file previously recorded only the first, searched it, found no rule, and concluded
+that the process was unpublished. **That was wrong**, it was wrong in three files, and the
+correction is recorded rather than quietly overwritten (`adapters/SOURCES.md`,
+`adapters/README.md`). The artifact genuinely has no rule in it -- ten search-related
+identifiers occur zero times in its five files -- but the rule was never supposed to be
+there.
 
-**Where it would belong, if we want it.** Not in `methods/` -- it is not a rule. It is a
-**harness**: the right home is `base_harness/<name>/`, and the portable part is its
-*delta* over Terminus-KIRA (the environment snapshot injected into the first prompt), which
-`adapters/metaharness.py:101-103` also records (`inherits: Terminus-KIRA / harbor's
-Terminus-2`). That is a genuinely interesting candidate for one reason: our
-`terminal_bench` dataset **is** Terminal-Bench 2.0, and the artifact's own README claims
-**76.4%** on Terminal-Bench 2.0 -- so a port of the bootstrap onto our reference harness
-would put a published, evolution-discovered harness on the same 89 tasks as our own
-harnesses, measured by the platform. It is on the list as an experiment, not as an
-integration.
+### The rule, read from the shipped loop
 
----
+The paper's one-sentence version: *"an outer-loop system that searches over harness code
+for LLM applications… an agentic proposer that accesses the source code, scores, and
+execution traces of all prior candidates through a filesystem."* In the TB2 example the
+loop is:
+
+1. **Propose.** `propose_claude(..., timeout=2400)` runs a Claude Code session that reads a
+   prompt rendered from the iteration number and the accumulated history and writes new
+   candidate agent classes. Their README: *"The wrapper must log proposer interactions."*
+2. **Gate before paying.** `validate_agent_class` requires the named import path to exist,
+   to be a class, and to subclass harbor's `Terminus2`; `smoke_test(..., timeout=1800)`
+   runs it on a single task. Cheap refusal before an expensive evaluation.
+3. **Evaluate.** `harbor_run(import_path, job_name, n_trials=2, n_concurrent=10)`. The
+   default search config in the release is **Opus 4.6, the full 89-task TB2 suite, 2 trials
+   per task, concurrency 50**, with a 30-task `hard` subset for cheap iteration and an
+   optional `--full-eval` 5-trial winner pass.
+4. **Frontier.** `update_frontier(candidates_results)` keeps a **per-task** best: for every
+   task, the best pass rate seen and which agent produced it, plus `_best` for the overall
+   average. This is the selection shape no other method we port has -- not one incumbent,
+   a task-level map of who is best at what.
+5. **Bookkeeping.** `update_evolution_summary(...)` appends one JSONL row per candidate with
+   its declared `hypothesis`, its `changes`, its `avg_pass_rate`, its `per_task`, its
+   `delta` against the best, an `outcome` string, and `rollout_metrics`. The delta is
+   computed platform-side from the measured scores; the hypothesis comes from the proposer.
+
+### Why it is the closest of the eight to this platform, and where it differs
+
+Its proposer reads **a filesystem of prior candidates**: source, scores and traces. That is
+what our method channel *is* (`_harnessgrad/`: `round.json`, `tasks/`, `history/`,
+`states/`, `SKILL.md`) -- so Meta-Harness is the independent confirmation that this design
+is the right shape for automated harness engineering, arrived at from the other direction.
+
+The differences are then concrete, and each one is a field we already have or a limit we
+already know about:
+
+| | Meta-Harness | HarnessGrad |
+| --- | --- | --- |
+| history depth | **all** prior candidates' source, scores and traces | the newest 12 states (`STATES_KEPT`), plus every curve point |
+| selection shape | a **per-task** frontier (best agent per task) plus an overall best | one incumbent per round; which state to build on is the method's decision |
+| what is searched on vs reported on | the **same** 89-task TB2 suite, 2 trials during search, `--full-eval` for the winner | the studied side and the exam side are different task sets, and `selection_effect.selected_on_reported_set` records when a number was selected on the set it is reported on |
+| trials | 2 during search, 5 for the optional winner pass | `--trials N`, with `per_task_std`/`score_std` on the point and omitted at N=1 |
+| proposer | Claude Code, with tools, 40-minute timeout | the shared single-turn `editor`, unless the run resolves an agentic improver (codex) |
+| gate | validate import + smoke test on one task **before** the evaluation | mode A cannot smoke-test: a candidate that is handed over *is* evaluated. The gate can only move to "do not spend this round" |
+
+### What a port would take
+
+Not written yet, and worth doing, in this order: (1) the **frontier** as a record
+(`method_reported.meta_harness_frontier` with the per-task map and the overall best) plus a
+directive naming which staged state the next round should build on -- the same degradation
+HarnessX's revert suffers from, because mode A cannot let a method reject a measured
+candidate; (2) the **validate + smoke gate** as a pre-spend decision, which needs a cheap
+"does this candidate even import" check the platform can run without a full evaluation --
+today the platform's own `candidate.validate` does that after the method has already spent
+its model call, so a port would have to reimplement the cheap half inside the method;
+(3) the **candidate row** (`hypothesis`, `changes`, measured `delta` against the best),
+most of which this platform already records as `hypothesis`, `edits_applied` and the curve
+point itself.
+
+Two honest notes about scale. Their default run is 89 tasks × 2 trials at concurrency 50 on
+Opus 4.6, with the release note *"It has not been tested beyond verifying that it runs"* --
+so a port here would be a different experiment on a different model, not a reproduction.
+And their search evaluates on the suite the result is reported on, which our platform
+treats as a fact to record rather than a thing to fix: a curve point says whether it was
+selected on the set it is reported on.
 
 ## 7. How to check any of this
 

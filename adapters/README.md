@@ -18,10 +18,13 @@
 > replay** — it is the live interface that lets RRSI's own search loop drive with
 > the platform supplying measurement, and it remains maintained.
 >
-> Two methods have no port and therefore no route at all any more: **MAC**, whose
-> code contains no decision rule to port, and **Meta-Harness**, whose search
-> framework was never released. Their adapters below still describe what those
-> releases contain, which is the only thing anyone can say about them.
+> Two methods have no port: **MAC**, whose code contains no decision rule to port, and
+> **Meta-Harness**, whose *output* is a harness that needs harbor's runtime and whose
+> *process* lives in a second repository (`stanford-iris-lab/meta-harness`) that these
+> adapters were never written against. Their adapters below describe the releases they
+> were written for. The Meta-Harness correction -- an earlier version of this file said
+> its search framework "was never released", which was false -- is recorded in
+> `SOURCES.md` and `docs/methods_we_port.md` §6.
 
 An adapter translates an **existing** method's artifacts into the trajectory the
 platform reads. It is written *by us, for the platform*, and it never modifies the
@@ -49,7 +52,7 @@ touching the method.
 | AHE | **declarations** (YAML/markdown) for NexAU | compile; the **engine is the method's** | needs `nexau` |
 | MAC | one artifact file, `BaseAIMEAgent` subclass | compile | needs its key + endpoint |
 | HarnessX | **a YAML**, with the model deliberately outside | compile; **model is a composition input** | needs `harnessx` + a model config |
-| Meta-Harness | **output only** | **report that it cannot be compiled** | **no — by construction** |
+| Meta-Harness (artifact) | a harness that needs harbor's runtime | **report that it cannot be compiled** | no — it needs to *be* the agent inside harbor |
 
 **Every adapter hit the same wall, from a different direction:** the platform's unit
 of exchange is a directory that can solve a task on its own, and **no published
@@ -300,7 +303,7 @@ if it had.
 | `ahe.py` | AHE | **declarations, not code** | the component files at fixed mount points | the method's own runs |
 | `mac.py` | MAC | **a method that is itself a platform** | one artifact file (`artifact.py`) | the artifact's own benchmark |
 | `harnessx.py` | HarnessX | **a YAML, and the model is not in it** | `harness_config.yaml` (+ the example's own code) | the method's own runs |
-| `metaharness.py` | Meta-Harness | **output only, no process** | nothing invocable | the README's 76.4% |
+| `metaharness.py` | Meta-Harness | **artifact only**; the process is a separate repo | nothing invocable | the README's 76.4% |
 
 All four were read, not run. Cloning note: `git clone` times out from this host;
 `https://codeload.github.com/<owner>/<repo>/tar.gz/refs/heads/<branch>` works,
@@ -368,9 +371,14 @@ title in the console says "(移植)".
   a cryptographic held-out split. The only rule it encodes is artifact
   admissibility (one subclass of `BaseAIMEAgent`). A port would have to invent
   the decision rule, so there is none.
-* **Meta-Harness** publishes its *output* and not its process. The released
-  artifact contains no search, acceptance, budget, novelty or critic code, and
-  its README says the search framework is "coming soon". No rule is recoverable,
-  and guessing one would be worse than saying so.
+* **Meta-Harness** is the case where the *output* and the *process* are two different
+  repositories, and this project read only the first. The artifact
+  (`meta-harness-tbench2-artifact`) is a harness whose contribution is executing inside
+  harbor's sandbox, so it cannot be compiled here; the process
+  (`stanford-iris-lab/meta-harness`, "Official code for Meta-Harness, 2603.28052")
+  contains the search loop and is a **port candidate**: its rule is `update_frontier`
+  (a per-task best map, not a single incumbent), a validate + smoke gate before the
+  expensive evaluation, and one bookkeeping row per candidate carrying its declared
+  hypothesis, its changes and its measured delta against the best.
 
 Both remain in the replay set, where what they do publish is recorded honestly.

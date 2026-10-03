@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
 """Adapter: the Meta-Harness artifact -> a HarnessGrad trajectory.
 
-This is the ninth shape and the limiting case of the whole exercise: **a method
-that published its output and not its process**, and whose output cannot be
-measured outside the environment it was built for.
+This is the ninth shape and the limiting case of the whole exercise: **an artifact
+whose contribution cannot be measured outside the environment it was built for** --
+and, as it turned out, the *output* half of a method whose *process* was released in
+a different repository.
+
+**Correction (2026-10-04).** This file used to say the method "published its output
+and not its process". That was wrong: `stanford-iris-lab/meta-harness` is the official
+framework for arXiv 2603.28052 and contains the search loop
+(`reference_examples/terminal_bench_2/meta_harness.py`, `update_frontier`, the
+validate + smoke gate, one bookkeeping row per candidate). What is in *this* adapter
+is still only the artifact, and the artifact still cannot be compiled here; the process
+is a port candidate and is described in `docs/methods_we_port.md` §6. The misreading
+came from reading the artifact repository alone, and it is kept in view rather than
+deleted because the same shortcut is available to anyone reading a release.
 
 What it is
 ----------
@@ -18,7 +29,7 @@ One file, `agent.py`, 1321 lines, defining `class AgentHarness(Terminus2)`
     coming soon."*
 
 So the contribution is a small delta over an inherited harness, and the search that
-found it is not in the release. That matches what the literature review turned up
+found it is not in *this* release. That matches what the literature review turned up
 independently: the winning Terminal-Bench harness *"inherits Terminus-KIRA's native
 tool calling, 30KB output cap, and multi-perspective completion checklist"*, and
 what Meta-Harness adds is bootstrapping.
@@ -133,12 +144,13 @@ def to_trajectory(repo: Path) -> dict:
         "nominated": 0,
         # One point is not a curve. Saying so is the point: the released artifact
         # carries no trajectory, and drawing a line through a single point would
-        # invent the process the method chose not to publish.
+        # invent a search path that this repository does not contain.
         "trajectory_shape": "single_point",
-        "curve_drawn": "none (one state, no process)",
+        "curve_drawn": "none (the artifact is one state; its search is a separate repo)",
         "rhythm": {
-            "note": "not reported: the search that produced this artifact is not "
-                    "in the release. Its README says 'more details coming soon'.",
+            "note": "not reported here: this release is the artifact alone. The search "
+                    "that produced it is `stanford-iris-lab/meta-harness` "
+                    "(arXiv 2603.28052), which this adapter was not written against.",
         },
         "selected_on_reported_set": None,
         "selection_pool_size": 1,

@@ -22,6 +22,7 @@ Retrieve with `adapters/fetch.sh` (downloads to a sibling `methods_src/`).
 | SICA | `MaximeRobeyns/self_improving_coding_agent` | **`master`** | 113 | `1e617c7abdba1c4d` |
 | TTHE | `junnie00/TTHE` | `main` | 57 | `08a983bf109f4c33` |
 | TTHE (runtime) | — | — | — | needs its own `config.yaml`; see `adapters/README.md` |
+| Meta-Harness (framework) | `stanford-iris-lab/meta-harness` | `main` | 65 | tree `8123ccab…` — see below |
 | RRSI | `google-research/rrsi` | — | — | see below |
 
 **The digest** is `sha256` over the concatenated contents of every `.py`, `.md`,
@@ -39,11 +40,37 @@ Its patches, dataset pin and run script live in the RISE repository under
 `tools/rrsi/` — that is where the disclosure belongs, because it is the only
 method whose results here depend on code we changed.
 
-**Meta-Harness** appears only as an artifact: four files
-(`agent.py`, `prompt-templates/terminus-kira.txt`, `anthropic_caching.py`,
-`pyproject.toml`). The search framework is not released. It is kept in the set
-deliberately, as the extreme case of a method that publishes an *output* and not
-a *process*.
+**Meta-Harness is two repositories, and reading only one of them produced a false
+claim in this project.** `stanford-iris-lab/meta-harness-tbench2-artifact` is the
+*output*: the paper's optimized Terminal-Bench 2 harness (76.4%). The *process* is
+`stanford-iris-lab/meta-harness` -- "Official code for Meta-Harness (2603.28052)" --
+which carries the framework, two reference experiments
+(`reference_examples/terminal_bench_2/meta_harness.py` is the TB2 search loop) and an
+`experimental/harbor_meta_harness/controller.py`. Until 2026-10-04 this file recorded
+only the artifact and asserted that "the search framework is not released"; that
+sentence was false and had propagated into `adapters/README.md` and
+`docs/methods_we_port.md` §6. The framework's tree sha when the correction was made is
+`8123ccabe2b19fa1123090b2e5f1bacc20963ce8` (branch `main`, pushed 2026-10-02); its
+content digest is not in the table below, for the reason in the next section.
+
+## A measured defect in the digest column
+
+The digests in the table are **not reproducible from the rule this file states**, and that
+was measured rather than suspected. Reimplementing the documented rule (sha256 over the
+concatenated contents of every `.py`, `.md`, `.yaml`, `.yml` and `.toml` file in the tree,
+sorted by path, truncated to 16 hex characters) reproduces the *file counts* exactly for
+three checkouts on this host and **none** of their recorded digests:
+
+| method | files (rule) | recomputed | recorded |
+| --- | ---: | --- | --- |
+| DGM | 40 | `84df704d0e6f5696` | `c0e9bd2f3d16d6b5` |
+| SICA | 113 | `6eb2b1358dc50eb7` | `1e617c7abdba1c4d` |
+| TTHE | 57 | `0821dbf28e8c7d07` | `08a983bf109f4c33` |
+
+`adapters/fetch.sh` contains no digest computation, so the recorded values were produced
+by something that is not in this repository. Until the column is recomputed under a rule
+that lives here, read it as a label and not as a check: the verifiable identity of a
+checkout is the tree sha you fetched, and the file count is a weak second.
 
 ## What is deliberately absent
 
