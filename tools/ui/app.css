@@ -1,0 +1,664 @@
+ /* ===================== 设计 token =====================
+    借鉴的是大厂后台的那套做法,不是某个具体产品的外观:一套中性色阶 + **一个**强调色,
+    8px 间距栅格,克制的边框和极浅的投影,以及一致的控件高度。原来的问题是密度和层级
+    —— 13px 正文配 11px 全大写标签、卡片没有投影、表单靠 flex-wrap 随意换行 ——
+    所以修的是这些,不是换配色。 */
+ :root{
+   /* ===================== 设计 token v2 =====================
+      参考的是 2025 年开发者工具那一批的做法(Linear / Vercel / Supabase 一类):
+      **近单色表面 + 一个强调色**,层次靠"表面亮度 + 1px 细线 + 极浅投影",不靠粗边框;
+      字号/行高/字重分三级,数字一律 tabular;控件高度统一,间距走 4px 栅格。
+
+      上一版的三个具体问题:`#f7f8fa` 表面太灰、卡片没有投影所以没有层级;正文 13px
+      配 11px 全大写标签,中文读起来挤;强调色只用在按钮上,于是"当前在哪"没有视觉锚点。
+      这一版把表面做暖、把标签改成小号正常大小写、让强调色承担导航和焦点。 */
+   --bg:#fff;
+   --bg-app:#f6f7f9;
+   --bg-side:#fcfcfd;          /* 侧栏比内容区亮一档,像一张浮起来的纸 */
+   --bg-code:#f5f6f8;
+   --bg-hover:rgba(17,24,39,.04);
+   --bg-active:rgba(17,24,39,.07);
+   --bg-inset:#fafbfc;
+
+   --fg:#0b1220;               /* 标题 */
+   --fg-2:#39415a;             /* 正文 */
+   --fg-3:#6b7385;             /* 次要 */
+   --fg-4:#9aa1b1;             /* 弱化 */
+   --fg-5:#c2c7d2;             /* 占位 */
+
+   --line-1:rgba(17,24,39,.06);
+   --line-2:rgba(17,24,39,.09);
+   --line-3:rgba(17,24,39,.14);
+   --grid:rgba(17,24,39,.06);
+
+   /* 强调色:一个,用在导航选中、焦点环、主按钮、图表主线 */
+   --brand:#4f46e5; --brand-hover:#4338ca; --brand-50:#eef2ff; --brand-100:#e0e7ff;
+   --brand-ring:rgba(79,70,229,.18);
+
+   --ok:#0f9d58; --ok-bg:#eafaf0; --ok-fg:#046c4e;
+   --warn:#f59e0b; --warn-bg:#fff8eb; --warn-fg:#a15c07;
+   --err:#e5484d; --err-bg:#fef2f2; --err-fg:#a12127;
+
+   --r-1:6px; --r-2:9px; --r-3:13px; --r-4:18px; --r-pill:999px;
+   /* 投影只做两层:贴地的 1px,和浮起的 8px。三层以上在浅色底上会显脏。 */
+   --sh-1:0 1px 2px rgba(17,24,39,.05);
+   --sh-2:0 1px 2px rgba(17,24,39,.04), 0 8px 24px -12px rgba(17,24,39,.14);
+   --sh-3:0 2px 4px rgba(17,24,39,.05), 0 18px 40px -20px rgba(17,24,39,.22);
+
+   --ease:cubic-bezier(.4,0,.2,1); --dur:.16s;
+   --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",
+          "Microsoft YaHei","Helvetica Neue",Helvetica,Arial,sans-serif;
+   --mono:"SF Mono","JetBrains Mono","Fira Code",Consolas,"Liberation Mono",Menlo,
+          "PingFang SC","Microsoft YaHei";
+   --sidebar:212px;
+   --topbar:56px;
+   --focus:0 0 0 3px var(--brand-ring);
+ }
+ *{box-sizing:border-box}
+ html,body{height:100%}
+ body{margin:0;background:var(--bg-app);color:var(--fg);font:14px/1.55 var(--font);
+      -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+ button,input,select{font-family:inherit;font-size:14px}
+ ::selection{background:var(--brand-50)}
+ /* ---- 框架 ---- */
+ .frame{display:grid;grid-template-columns:var(--sidebar) minmax(400px,1fr);
+        height:100vh;transition:grid-template-columns var(--dur) var(--ease)}
+ .frame.collapsed{--sidebar:60px}
+ /* ---- 侧栏 ---- */
+ .side{background:var(--bg-side);border-right:1px solid var(--line-2);
+       display:flex;flex-direction:column;min-width:0;overflow:hidden}
+ .side .brand{display:flex;align-items:center;gap:10px;padding:16px 18px;min-height:60px}
+ .side .brand .mark{width:26px;height:26px;border-radius:var(--r-2);flex:0 0 auto;
+   background:linear-gradient(135deg,var(--brand),#7c74f0);display:grid;place-items:center;
+   color:#fff;font-size:13px;font-weight:700;box-shadow:var(--sh-1)}
+ .side .brand .name{font-size:14px;font-weight:650;white-space:nowrap;overflow:hidden;
+   letter-spacing:-.01em}
+ .frame.collapsed .side .brand .name{display:none}
+ .nav{padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+ .nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+   background:none;border:none;border-radius:var(--r-2);padding:8px 11px;font-size:13.5px;
+   color:var(--fg-2);cursor:pointer;transition:background var(--dur) var(--ease),
+   color var(--dur) var(--ease);white-space:nowrap;font-weight:500}
+ .nav button:hover{background:var(--bg-hover);color:var(--fg)}
+ .nav button.on{background:var(--brand-50);color:var(--brand);font-weight:600}
+ .nav button .ico{width:17px;flex:0 0 auto;text-align:center;font-size:14px;opacity:.85}
+ .frame.collapsed .nav button .lbl{display:none}
+ .frame.collapsed .nav button{justify-content:center;padding:9px 0}
+ .side .grow{flex:1}
+ .side .foot{padding:12px 16px;border-top:1px solid var(--line-1);font-size:12px;
+             color:var(--fg-4);display:flex;flex-direction:column;gap:7px}
+ .frame.collapsed .side .foot{display:none}
+ .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;
+      vertical-align:middle}
+ .dot.ok{background:var(--ok);box-shadow:0 0 0 3px var(--ok-bg)}
+ .dot.off{background:var(--fg-4)}
+ .collapse{background:none;border:none;color:var(--fg-4);cursor:pointer;padding:5px 9px;
+   border-radius:var(--r-1);font-size:12.5px;transition:background var(--dur) var(--ease)}
+ .collapse:hover{background:var(--bg-hover);color:var(--fg-2)}
+ /* ---- 主区 ---- */
+ .main{overflow:auto;min-width:0}
+ .topbar{position:sticky;top:0;z-index:5;background:rgba(255,255,255,.82);
+   backdrop-filter:blur(10px);border-bottom:1px solid var(--line-2);padding:0 26px;
+   display:flex;align-items:baseline;gap:14px;min-height:60px}
+ .topbar h2{margin:0;font-size:16px;font-weight:650;letter-spacing:-.01em}
+ .topbar .sub{color:var(--fg-4);font-size:12.5px}
+ .wrap{padding:26px;max-width:1160px}
+ .view{display:none} .view.on{display:block}
+ /* ---- 卡片 ---- */
+ .card{background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-3);
+   padding:20px;margin-bottom:16px;box-shadow:var(--sh-1)}
+ .card>h3,.card>b:first-child{display:block;margin:0 0 4px;font-size:15px;font-weight:650;
+   letter-spacing:-.01em}
+ .hint{color:var(--fg-4);font-size:12.5px;line-height:1.65}
+ .mnote{margin-top:8px;padding:9px 12px;background:var(--brand-50);
+   border:1px solid rgba(79,70,229,.14);border-radius:var(--r-2);color:var(--fg-2);
+   font-size:12.5px;line-height:1.65}
+ .mnote b{font-weight:650;color:var(--fg)}
+ /* ---- 表单:栅格而不是 flex-wrap ---- */
+ .config{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+   gap:16px 18px;align-items:start}
+ .field{display:flex;flex-direction:column;gap:6px;min-width:0}
+ .field label{font-size:12.5px;font-weight:550;color:var(--fg-2)}
+ select,input[type=text],input[type=number],input[type=password]{
+   height:36px;padding:0 11px;border:1px solid var(--line-2);border-radius:var(--r-2);
+   font-size:13.5px;background:var(--bg);color:var(--fg);width:100%;min-width:0;
+   transition:border-color var(--dur) var(--ease),box-shadow var(--dur) var(--ease)}
+ select{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%2398a2b3' stroke-width='1.6' stroke-linecap='round'/></svg>");
+   background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+ select:hover,input:hover{border-color:var(--line-3)}
+ select:focus,input:focus{outline:none;border-color:var(--brand);
+   box-shadow:0 0 0 3px rgba(79,70,229,.13)}
+ input:disabled,select:disabled{background:var(--bg-code);color:var(--fg-4);cursor:not-allowed}
+ .chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--fg-2);
+      cursor:pointer;user-select:none}
+ .chk input{accent-color:var(--brand);width:14px;height:14px}
+ /* 任务清单 */
+ .tk-row{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:var(--r-1);
+   cursor:pointer;font-size:13px;transition:background var(--dur) var(--ease)}
+ .tk-row:hover{background:var(--bg-hover)}
+ .tk-row.off{opacity:.55;cursor:not-allowed}
+ .tk-row.off:hover{background:none}
+ .tk-row code{font-family:var(--mono);font-size:12px;color:var(--fg-2);flex:0 0 auto}
+ .tk-row .dim{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;
+   text-overflow:ellipsis}
+ .tk-row .why{margin-left:auto;flex:0 0 auto;font-size:11.5px;color:var(--warn-fg);
+   white-space:nowrap}
+ .tk{accent-color:var(--brand);width:14px;height:14px;flex:0 0 auto}
+ .tk:disabled{opacity:.5}
+ /* 曲线与解释:这两个类一直在用却没有规则 —— 图会溢出卡片,解释会挤成一坨 */
+ .chartwrap{width:100%;overflow-x:auto}
+ .g-lane{margin-top:18px}
+ .g-lane:first-child{margin-top:4px}
+ .g-lane-head{display:flex;align-items:baseline;gap:10px;padding-bottom:6px;
+   margin-bottom:8px;border-bottom:1px solid var(--line-1);font-size:13px}
+ .g-lane-head b{font-weight:650;color:var(--fg)}
+ #chart{display:block;width:100%;height:auto}
+ .expl{margin-top:10px;padding:13px 15px;background:var(--bg-code);
+   border:1px solid var(--line-1);border-radius:var(--r-2);font-size:13px;
+   line-height:1.78;color:var(--fg-2);white-space:pre-wrap}
+ /* ---- 筛选:按钮组,不是下拉 ----
+    下拉把它变成"一个字段",于是它和 harness、任务集、模型并列,而它其实不是配置,
+    是视图。按钮组一眼看得出有哪几个值、当前选的是哪个。 */
+ .filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px;
+   margin-top:15px;padding-top:14px;border-top:1px solid var(--line-1)}
+ .fgroup{display:inline-flex;gap:2px;padding:2px;background:var(--bg-code);
+   border:1px solid var(--line-1);border-radius:var(--r-2)}
+ .seg{border:none;background:none;color:var(--fg-3);font:inherit;font-size:12.5px;
+   font-weight:550;height:26px;padding:0 11px;border-radius:calc(var(--r-2) - 2px);
+   cursor:pointer;white-space:nowrap;transition:all var(--dur) var(--ease)}
+ .seg:hover{color:var(--fg)}
+ .seg.on{background:var(--bg);color:var(--brand);box-shadow:var(--sh-1)}
+ .filters .chk{margin-left:auto}
+ /* ---- 两个面板:train 与 eval 是两次独立运行,所以并排两块卡,各自一个按钮 ---- */
+ .duo{display:grid;grid-template-columns:1fr 1fr;align-items:stretch;
+   grid-template-rows:auto auto auto auto 1fr auto;gap:14px 16px;margin-bottom:16px}
+ .duo>.card{display:grid;grid-template-rows:subgrid;grid-row:span 6;gap:0;margin-bottom:0}
+ .duo h3{margin:0}
+ .task-list{max-height:232px;align-self:start}
+ .subhead{display:flex;align-items:center;gap:9px;margin:0 0 7px;
+   font-size:12.5px;font-weight:600;color:var(--fg-2)}
+ .subhead a{font-weight:500;font-size:12px;color:var(--brand);text-decoration:none}
+ .subhead a:hover{text-decoration:underline}
+ .subhead .dim{font-weight:400}
+ @media(max-width:1080px){
+   .duo{display:block}
+   .duo>.card{display:block;margin-bottom:16px}
+   .duo h3{margin-bottom:9px}
+   .subhead{margin:16px 0 7px}}
+ .task-list{max-height:232px;overflow-y:auto;padding:5px;border:1px solid var(--line-1);
+   border-radius:var(--r-2);background:var(--bg-side)}
+ /* ---- 按钮 ---- */
+ .btn{border:1px solid var(--line-2);background:var(--bg);color:var(--fg);
+   border-radius:var(--r-2);height:36px;padding:0 15px;font-size:13.5px;font-weight:550;
+   cursor:pointer;transition:all var(--dur) var(--ease);white-space:nowrap;
+   display:inline-flex;align-items:center;justify-content:center;gap:7px;
+   box-shadow:var(--sh-1)}
+ .btn:hover{background:var(--bg-hover)}
+ .btn:active{transform:translateY(.5px)}
+ .btn.primary,.go{background:var(--brand);border-color:var(--brand);color:#fff;
+   font-weight:600;box-shadow:0 1px 2px rgba(79,70,229,.28)}
+ .btn.primary:hover,.go:hover{background:var(--brand-hover);border-color:var(--brand-hover)}
+ .btn.primary:disabled,.go:disabled{background:var(--fg-4);border-color:var(--fg-4);
+   cursor:not-allowed;box-shadow:none}
+ .go{border:none;border-radius:var(--r-2);height:36px;padding:0 18px;font-size:13.5px;
+   cursor:pointer;transition:all var(--dur) var(--ease)}
+ .btn.ghost,.gh{border:1px solid var(--line-2);background:var(--bg);color:var(--fg-2);
+   border-radius:var(--r-2);height:32px;padding:0 13px;font-size:13px;cursor:pointer;
+   transition:all var(--dur) var(--ease);display:inline-flex;align-items:center;gap:6px}
+ .btn.ghost:hover,.gh:hover{background:var(--bg-hover);color:var(--fg)}
+ .gh:disabled{opacity:.5;cursor:not-allowed}
+ /* ---- 药丸 ---- */
+ .pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;
+   border-radius:var(--r-pill);font-size:11.5px;font-weight:550;border:1px solid var(--line-2);
+   color:var(--fg-3);white-space:nowrap}
+ .pill.ok{color:var(--ok-fg);border-color:rgba(18,183,106,.24);background:var(--ok-bg)}
+ .pill.warn{color:var(--warn-fg);border-color:rgba(247,144,9,.26);background:var(--warn-bg)}
+ .pill.err{color:var(--err-fg);border-color:rgba(240,68,56,.24);background:var(--err-bg)}
+ .pill.accent{color:var(--brand);border-color:rgba(79,70,229,.22);background:var(--brand-50)}
+ /* ---- 表格 ---- */
+ table{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px}
+ th{padding:9px 12px;text-align:left;font-size:12px;font-weight:600;color:var(--fg-3);
+    background:transparent;border-bottom:1px solid var(--line-2);white-space:nowrap}
+ td{padding:11px 12px;border-bottom:1px solid var(--line-1);vertical-align:middle}
+ tbody tr:last-child td{border-bottom:none}
+ tr.click{cursor:pointer;transition:background var(--dur) var(--ease)}
+ tr.click:hover{background:var(--bg-hover)}
+ /* ---- 代码 / diff ---- */
+ pre{margin:0;background:var(--bg-code);border:1px solid var(--line-1);
+   border-radius:var(--r-2);padding:14px;overflow:auto;max-height:380px;
+   font:12px/1.65 var(--mono);color:var(--fg-2);white-space:pre}
+ code{font:12px var(--mono);background:var(--bg-code);border:1px solid var(--line-1);
+   padding:1.5px 6px;border-radius:var(--r-1);color:var(--fg-2)}
+ .add{color:var(--ok-fg)}.del{color:var(--err-fg)}.ctx{color:var(--fg-4)}
+ /* ---- 事件日志 ---- */
+ .ev{border:1px solid var(--line-2);border-radius:var(--r-3);background:var(--bg);
+   max-height:320px;overflow:auto;margin-top:10px}
+ .ev-head{display:grid;grid-template-columns:86px 1fr;gap:4px 16px;
+   padding:13px 15px;border-bottom:1px solid var(--line-1)}
+ .ev-head b{font-weight:500;color:var(--fg-4);font-size:12.5px}
+ .ev-head span{color:var(--fg-2);min-width:0;overflow-wrap:anywhere;font-size:13px}
+ .ev-body{padding:5px 15px 9px}
+ .ev-row{display:flex;gap:12px;align-items:baseline;padding:6px 0;
+   border-bottom:1px solid var(--line-1)}
+ .ev-row:last-child{border-bottom:none}
+ .ev-k{flex:0 0 auto;font:12px var(--mono);color:var(--fg-4);min-width:52px}
+ .ev-m{flex:1 1 auto;min-width:0;color:var(--fg-2);overflow-wrap:anywhere}
+ .ev-n{flex:0 0 auto;font:12px var(--mono);color:var(--fg-2);
+   font-variant-numeric:tabular-nums}
+ .ev-row.warn .ev-m{color:var(--warn-fg)}
+ .ev-row.err .ev-m{color:var(--err-fg)}
+ .ev-empty{padding:16px 15px;color:var(--fg-4)}
+ .ev-raw{padding:0 15px 13px;font-size:12px;color:var(--fg-4)}
+ .ev-raw pre{max-height:200px;margin-top:5px}
+ /* ---- 进度条：跑的时候「现在在哪」 ---- */
+ /* 这一条的用途是反驳"卡死了"。没有它,面板在一轮 100 分钟里显示的是同一屏:
+    driver 只在轮次结束时写事件,轮内五道题一个事件都不写。 */
+ .ev-now{padding:11px 15px;border-bottom:1px solid var(--line-1);
+   display:flex;flex-direction:column;gap:7px;background:var(--bg-code)}
+ .ev-now-l{display:flex;align-items:baseline;gap:10px;font-size:13px;color:var(--fg-2);
+   min-width:0;flex-wrap:wrap}
+ .ev-now-l b{font-weight:600;color:var(--fg)}
+ .ev-now-l .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);
+   flex:0 0 auto;animation:pulse 1.6s ease-in-out infinite}
+ @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+ .ev-now-l .ph{color:var(--fg)}
+ .ev-now-l .sp{flex:1 1 auto}
+ .ev-now-l .num{font:12px var(--mono);color:var(--fg-4);font-variant-numeric:tabular-nums}
+ .ev-bar{height:4px;border-radius:2px;background:var(--line-2);overflow:hidden}
+ .ev-bar>i{display:block;height:100%;background:var(--brand);transition:width .4s}
+ .ev-now.warn .ev-bar>i{background:var(--warn-fg)}
+ .ev-now.warn .ev-now-l .dot{background:var(--warn)}
+ .ev-last{margin-left:auto;font:12px var(--mono);color:var(--fg-4);
+   font-variant-numeric:tabular-nums}
+ .ev-out{margin-top:4px}
+ .ev-out summary{cursor:pointer;color:var(--fg-4);font-size:12px}
+ .ev-out pre{max-height:260px;overflow:auto;margin-top:4px}
+ /* ---- 曲线 / 图 ---- */
+ .pt{cursor:pointer}
+ .pt circle{transition:all var(--dur) var(--ease)}
+ .legend{display:flex;gap:20px;font-size:12.5px;color:var(--fg-4);margin-top:10px;
+   flex-wrap:wrap}
+ .steps{display:flex;gap:7px;flex-wrap:wrap;margin:16px 0 12px}
+ .steps button{background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-2);
+   height:30px;padding:0 12px;cursor:pointer;font-size:12.5px;color:var(--fg-2);
+   font-variant-numeric:tabular-nums;transition:all var(--dur) var(--ease);font-weight:500}
+ .steps button:hover{background:var(--bg-hover)}
+ .steps button.on{border-color:var(--brand);color:var(--brand);background:var(--brand-50);
+   font-weight:600}
+ .files{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px;font-size:12.5px}
+ /* ---- 说明 / 状态 ---- */
+ .note{background:var(--brand-50);border:1px solid rgba(79,70,229,.14);
+   border-radius:var(--r-2);padding:13px 15px;font-size:13px;line-height:1.7;
+   white-space:pre-wrap;color:var(--fg-2)}
+ .status{display:grid;grid-template-columns:130px 1fr;gap:7px 14px;font-size:13px}
+ .status dt{color:var(--fg-4)}
+ .row{display:flex;gap:11px;align-items:center;flex-wrap:wrap}
+ .ok{color:var(--ok-fg)}.bad{color:var(--err-fg)}.dim{color:var(--fg-4)}
+ .mono{font-family:var(--mono)}
+ .score{font-variant-numeric:tabular-nums;font-weight:650}
+ .bar{display:grid;grid-template-columns:minmax(200px,300px) 1fr 56px;gap:14px;
+   align-items:center;font-size:13px;margin:8px 0}
+ .track{height:8px;background:var(--bg-code);border-radius:var(--r-pill);overflow:hidden}
+ .fill{height:100%;background:linear-gradient(90deg,var(--brand),#7c74f0);
+   border-radius:var(--r-pill);transition:width .4s var(--ease)}
+ a{color:var(--brand);text-decoration:none}
+ a:hover{text-decoration:underline}
+ @media(max-width:1024px){ .frame{grid-template-columns:60px minmax(300px,1fr)} }
+
+ /* ===================== 视觉层 v2 =====================
+    这一层放在原样式之后,只覆盖"看起来怎样",不动任何 id / class 结构 —— 面板的
+    render 函数依赖那些名字,改名就等于把功能一起改坏。分成四块:排版、框架、卡片与
+    控件、细节(焦点环、滚动条、选中态)。 */
+ /* ---- 排版:三级字号 + tabular 数字 ---- */
+ body{font:14.5px/1.6 var(--font);letter-spacing:-.003em}
+ h1,h2,h3{margin:0;letter-spacing:-.02em;font-weight:640;color:var(--fg)}
+ h2{font-size:17px}
+ b,strong{font-weight:620}
+ code,pre,.mono,.ev-k,.ev-n,.num{font-variant-numeric:tabular-nums}
+ .hint{color:var(--fg-3);font-size:12.5px;line-height:1.65}
+ .subhead{font-size:11.5px;font-weight:620;letter-spacing:.04em;text-transform:uppercase;
+   color:var(--fg-4)}
+
+ /* ---- 框架:顶栏做一条与内容分离的浅线,侧栏换成暖白 ---- */
+ .topbar{height:var(--topbar);border-bottom:1px solid var(--line-2);
+   background:var(--bg);position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:14px;padding:0 26px}
+ .wrap{padding:24px 26px 64px;max-width:1360px}
+ .side{background:var(--bg-side);border-right:1px solid var(--line-2)}
+ .side .brand{padding:18px 18px 14px;min-height:var(--topbar)}
+ .side .brand .mark{width:28px;height:28px;border-radius:9px;font-size:13.5px;
+   background:linear-gradient(150deg,#5b52ea,#7c74f0 60%,#9d7bf5);
+   box-shadow:0 1px 2px rgba(79,70,229,.35), 0 6px 16px -8px rgba(79,70,229,.6)}
+ .side .brand .name{font-size:14.5px;font-weight:660;letter-spacing:-.015em}
+ .nav{padding:6px 10px;gap:1px}
+ .nav button{padding:9px 12px;border-radius:10px;font-size:13.5px;font-weight:520;
+   color:var(--fg-2)}
+ .nav button .ico{font-size:15px;opacity:.7}
+ .nav button:hover{background:var(--bg-hover)}
+ .nav button.on{background:var(--brand-50);color:var(--brand);font-weight:600;
+   box-shadow:inset 0 0 0 1px var(--brand-100)}
+ .nav button.on .ico{opacity:1}
+ .side .foot{border-top:1px solid var(--line-1);padding:14px 16px;color:var(--fg-4);
+   font-size:12px;line-height:1.9}
+
+ /* ---- 卡片:浮起来一层,标题行与内容有节奏 ---- */
+ .card{background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-3);
+   box-shadow:var(--sh-1);padding:20px 22px;margin-bottom:16px;transition:box-shadow var(--dur) var(--ease)}
+ .card:hover{box-shadow:var(--sh-2)}
+ .card>h3,.card .card-h{font-size:14.5px;font-weight:640;letter-spacing:-.01em;
+   display:flex;align-items:center;gap:9px}
+ .duo{gap:16px}
+
+ /* ---- 控件:统一高度 + 一致的焦点环 ---- */
+ select,input[type=text],input[type=number]{
+   height:38px;border:1px solid var(--line-2);border-radius:10px;background:var(--bg);
+   padding:0 12px;color:var(--fg);font-size:13.5px;transition:border-color var(--dur) var(--ease),
+   box-shadow var(--dur) var(--ease),background var(--dur) var(--ease);
+   box-shadow:0 1px 1px rgba(17,24,39,.02)}
+ select:hover,input:hover{border-color:var(--line-3)}
+ select:focus,input:focus{outline:none;border-color:var(--brand);box-shadow:var(--focus)}
+ input::placeholder{color:var(--fg-5)}
+ .field label{font-size:11.5px;font-weight:600;letter-spacing:.03em;color:var(--fg-4);
+   text-transform:uppercase}
+ .btn,.gh,.go{height:38px;border-radius:10px;font-size:13.5px;font-weight:560;
+   transition:background var(--dur) var(--ease),border-color var(--dur) var(--ease),
+   box-shadow var(--dur) var(--ease),transform var(--dur) var(--ease)}
+ .go{background:var(--brand);border:1px solid var(--brand);color:#fff;
+   box-shadow:0 1px 2px rgba(79,70,229,.3), 0 8px 20px -12px rgba(79,70,229,.8)}
+ .go:hover{background:var(--brand-hover);border-color:var(--brand-hover)}
+ .go:active{transform:translateY(.5px)}
+ .go:focus-visible{outline:none;box-shadow:var(--focus)}
+ .go:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+ .gh{background:var(--bg);border:1px solid var(--line-2);color:var(--fg-2)}
+ .gh:hover{background:var(--bg-hover)}
+ .btn:focus-visible,.gh:focus-visible{outline:none;box-shadow:var(--focus)}
+ .chk{font-size:12.5px;color:var(--fg-3)}
+
+ /* ---- 任务列表:选中的一行要有明确的锚点 ---- */
+ .task-list{border:1px solid var(--line-2);border-radius:12px;background:var(--bg-inset);
+   padding:6px}
+ .task-list label{border-radius:8px;padding:7px 9px;font-size:13px}
+ .task-list label:hover{background:var(--bg-hover)}
+
+ /* ---- 徽标与状态:pill 更小、更安静;语义色只上文字和极浅底 ---- */
+ .pill{height:21px;padding:0 9px;border-radius:var(--r-pill);font-size:11.5px;
+   font-weight:560;letter-spacing:.005em;display:inline-flex;align-items:center;gap:5px}
+ .dot{width:7px;height:7px;border-radius:50%}
+
+ /* ---- 表格:去掉竖线,行悬停 ---- */
+ table{border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums}
+ th{font-size:11.5px;font-weight:620;letter-spacing:.03em;text-transform:uppercase;
+   color:var(--fg-4);border-bottom:1px solid var(--line-2)}
+ td{border-bottom:1px solid var(--line-1);font-size:13px}
+ tbody tr:hover td{background:var(--bg-inset)}
+
+ /* ---- 事件流 / 日志:等宽、可折叠、左侧一条状态色 ---- */
+ .ev{border:1px solid var(--line-2);border-radius:12px;background:var(--bg);
+   overflow:hidden}
+ .ev-row{padding:7px 15px;align-items:flex-start}
+ .ev-k{min-width:56px;color:var(--fg-4);font-size:11.5px;letter-spacing:.02em}
+ .ev-row.warn{box-shadow:inset 3px 0 0 var(--warn)}
+ .ev-row.err{box-shadow:inset 3px 0 0 var(--err)}
+ .ev-raw pre,.ev-out pre{background:var(--bg-code);border:1px solid var(--line-1);
+   border-radius:10px;padding:11px 13px;font:12.5px/1.6 var(--mono)}
+
+ /* ---- 新:解耦一览(方法 × 改进器 × skill)---- */
+ .split{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+ .split .cell{background:var(--bg-inset);border:1px solid var(--line-1);border-radius:12px;
+   padding:13px 14px;min-width:0}
+ .split .cell h4{margin:0 0 3px;font-size:11.5px;font-weight:620;letter-spacing:.04em;
+   text-transform:uppercase;color:var(--fg-4)}
+ .split .cell .v{font-size:13.5px;font-weight:560;color:var(--fg);
+   overflow-wrap:anywhere}
+ .split .cell .s{font-size:12px;color:var(--fg-3);margin-top:3px;overflow-wrap:anywhere}
+ .split .cell.bad{border-color:rgba(229,72,77,.35);background:var(--err-bg)}
+ .split .cell.bad .v{color:var(--err-fg)}
+ .flow{display:flex;align-items:stretch;gap:9px;flex-wrap:wrap}
+ .flow .node{flex:1 1 190px;min-width:0;background:var(--bg);border:1px solid var(--line-2);
+   border-radius:12px;padding:12px 13px;box-shadow:var(--sh-1)}
+ .flow .node .k{font-size:11.5px;font-weight:620;letter-spacing:.04em;text-transform:uppercase;
+   color:var(--fg-4);margin-bottom:4px}
+ .flow .node .v{font-size:13.5px;font-weight:560;overflow-wrap:anywhere}
+ .flow .node .s{font-size:12px;color:var(--fg-3);margin-top:3px;overflow-wrap:anywhere}
+ .flow .arrow{align-self:center;color:var(--fg-5);font-size:15px;flex:0 0 auto}
+
+ /* ---- 实验页:主区 + 右侧抽屉 ----
+    主区永远占满;抽屉是固定在右侧的一栏,关着时整栏移出视口(translateX),开着时
+    滑进来。桌面宽屏下它把主区压窄一点(不是盖住),所以"边看曲线边改配置"仍然成立;
+    窄屏下才变成浮层。 */
+ /* ---- 实验页:整宽配置区 + 结果 ----
+    不做侧边抽屉了:336px 的宽度对"基础 HARNESS / 任务集 / 方法 / 改进器 / 模型"这些
+    要读长文本的控件太窄,标签会换行、下拉里的名字被截断 —— 别人点开根本选不清。
+    现在是**整个宽度**的配置区,控件按 8px 栅格排几列,读得清也不用滚。
+    跑起来之后它自动收起(收成一行摘要),把屏幕让给曲线 —— 配置是"按一次"的东西,
+    结果是"一直要看"的东西。 */
+ .wb{display:block}
+ .wb-main{min-width:0}
+ #setup{display:flex;flex-direction:column;gap:14px}
+ #setup .card{margin:0}
+ /* 收起态:只留一行摘要 + 展开按钮。 */
+ #setup.collapsed .card{display:none}
+ #setup.collapsed .setup-head{display:flex}
+ .setup-head{display:none;align-items:center;gap:12px;padding:11px 16px;
+   background:var(--bg-2);border:1px solid var(--line-2);border-radius:12px}
+ .setup-head .sum{color:var(--fg-3);font-size:13px;overflow:hidden;text-overflow:ellipsis;
+   white-space:nowrap}
+ #setup:not(.collapsed) .setup-head{display:none}
+ /* 抽屉窄,栅格全部退成一列 —— 否则"改进方法/改进器/步数"三格会被压成看不清宽度的
+    碎片(实测:在 396px 里排三列,每格约 110px,标签直接换行到控件上)。 */
+ /* 抽屉里"训练/考试"两个面板不再并排 */
+ @media (max-width:1240px){
+ }
+
+ /* ---- 指标卡:仪表带上的数字要有"报告"的分量 ---- */
+ .split .cell{background:var(--bg);border:1px solid var(--line-2);
+   box-shadow:var(--sh-1);transition:box-shadow var(--dur) var(--ease),
+   transform var(--dur) var(--ease)}
+ .split .cell:hover{box-shadow:var(--sh-2)}
+ .split .cell .v{font-size:19px;font-weight:660;letter-spacing:-.02em;
+   font-variant-numeric:tabular-nums;line-height:1.25}
+ .split .cell h4{margin-bottom:5px}
+ .split .cell .s{font-size:11.5px;color:var(--fg-4)}
+
+ /* ---- 侧栏:分组标签,把导航从"四个按钮"变成有结构的面板 ---- */
+ .nav .grp{padding:13px 12px 5px;font-size:10.5px;font-weight:650;letter-spacing:.07em;
+   text-transform:uppercase;color:var(--fg-5)}
+ .frame.collapsed .nav .grp{display:none}
+
+ /* ---- 图表:给曲线更多呼吸,网格线更安静 ---- */
+ .chartwrap svg{max-height:340px}
+ #chart text{font-family:var(--mono);font-size:11px;fill:var(--fg-4)}
+
+ /* ---- 运行详情页:主列 + 右栏小卡 ---- */
+ .runhead{padding:2px 0 14px}
+ .cols{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+ .cols>.card{margin-bottom:0}
+ /* 曲线占满整宽:图大一点才看得出形状,这是这一页的主内容。 */
+ #curve-card #chart{height:340px;max-height:none}
+ #curve-card .chartwrap{min-height:340px}
+ #curve-card .steps{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+ #curve-card .steps button{white-space:nowrap}
+
+ /* ---- 运行页的两张表:窄屏横向滚动,不要把列压扁 ---- */
+ #run-rounds,#run-tasks{width:100%}
+ .card table{min-width:0}
+ @media (max-width:900px){.card table{display:block;overflow-x:auto;white-space:nowrap}}
+
+ /* ---- 细节:滚动条、选中、焦点可见性 ---- */
+ *{scrollbar-width:thin;scrollbar-color:var(--line-3) transparent}
+ ::-webkit-scrollbar{width:9px;height:9px}
+ ::-webkit-scrollbar-thumb{background:var(--line-3);border-radius:9px;
+   border:2px solid transparent;background-clip:content-box}
+ ::-webkit-scrollbar-thumb:hover{background:var(--fg-5);background-clip:content-box}
+ ::-webkit-scrollbar-track{background:transparent}
+ :focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:6px}
+ @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+ /* ===================== 深色工作台主题(默认) =====================
+    这是"看起来像不像 W&B"的关键一步:上一版只调了排版和间距,底色仍是浅灰白,所以
+    整页的**观感**几乎没变 —— 用户说"没啥区别"是准确的。
+
+    做法照抄成熟深色后台的三条规则:
+      1. **靠表面亮度分层,不靠边框**。画布最暗(--bg),卡片亮一档(--bg-2),
+         输入框再亮一档(--bg-3),悬停/选中用叠加层。边框只在必要时才出现。
+      2. **强调色只有一个**,而且只在"可点/当前"的地方用(导航选中、主按钮、焦点环)。
+      3. 深色下**不要纯黑、不要纯白**:文字用 #e8eaf0 一类的浅灰,投影改用"更深的黑"
+         而不是浅色阴影 —— 浅色阴影在深色底上会发灰。
+    浅色主题保留(右上角切换),因为要截图发推、要打印、也有人白天用。 */
+ :root{
+   --bg:#0f1116;
+   --bg-2:#161922;
+   --bg-3:#1d2130;
+   --bg-app:#0f1116;
+   --bg-side:#12141c;
+   --bg-code:#0c0e13;
+   --bg-inset:#141721;
+   --bg-hover:rgba(255,255,255,.045);
+   --bg-active:rgba(255,255,255,.075);
+
+   --fg:#e9ebf2;
+   --fg-2:#c3c8d6;
+   --fg-3:#8d94a8;
+   --fg-4:#6b7286;
+   --fg-5:#4a5064;
+
+   --line-1:rgba(255,255,255,.07);
+   --line-2:rgba(255,255,255,.105);
+   --line-3:rgba(255,255,255,.17);
+   --grid:rgba(255,255,255,.07);
+
+   --brand:#8b93ff; --brand-hover:#a3a9ff; --brand-50:rgba(139,147,255,.14);
+   --brand-100:rgba(139,147,255,.28); --brand-ring:rgba(139,147,255,.28);
+
+   --ok:#3ecf8e; --ok-bg:rgba(62,207,142,.13); --ok-fg:#7ee2b8;
+   --warn:#f5b544; --warn-bg:rgba(245,181,68,.13); --warn-fg:#f7cd80;
+   --err:#ff6369; --err-bg:rgba(255,99,105,.13); --err-fg:#ff9ea1;
+
+   --sh-1:0 1px 2px rgba(0,0,0,.4);
+   --sh-2:0 1px 2px rgba(0,0,0,.45), 0 10px 30px -14px rgba(0,0,0,.7);
+   --sh-3:0 2px 6px rgba(0,0,0,.5), 0 22px 48px -22px rgba(0,0,0,.8);
+ }
+ /* 亮色主题:同一套结构,把表面和文字反过来。加在 <html data-theme="light"> 上。 */
+ html[data-theme="light"]{
+   --bg:#ffffff; --bg-2:#ffffff; --bg-3:#ffffff; --bg-app:#f6f7f9;
+   --bg-side:#fcfcfd; --bg-code:#f5f6f8; --bg-inset:#fafbfc;
+   --bg-hover:rgba(17,24,39,.04); --bg-active:rgba(17,24,39,.07);
+   --fg:#0b1220; --fg-2:#39415a; --fg-3:#6b7385; --fg-4:#9aa1b1; --fg-5:#c2c7d2;
+   --line-1:rgba(17,24,39,.06); --line-2:rgba(17,24,39,.09); --line-3:rgba(17,24,39,.14);
+   --grid:rgba(17,24,39,.06);
+   --brand:#4f46e5; --brand-hover:#4338ca; --brand-50:#eef2ff; --brand-100:#e0e7ff;
+   --brand-ring:rgba(79,70,229,.18);
+   --ok:#0f9d58; --ok-bg:#eafaf0; --ok-fg:#046c4e;
+   --warn:#f59e0b; --warn-bg:#fff8eb; --warn-fg:#a15c07;
+   --err:#e5484d; --err-bg:#fef2f2; --err-fg:#a12127;
+   --sh-1:0 1px 2px rgba(17,24,39,.05);
+   --sh-2:0 1px 2px rgba(17,24,39,.04), 0 8px 24px -12px rgba(17,24,39,.14);
+   --sh-3:0 2px 4px rgba(17,24,39,.05), 0 18px 40px -20px rgba(17,24,39,.22);
+ }
+ /* 深色下的层次全靠表面亮度:卡片、侧栏、输入框各亮一档,边框退到几乎看不见。 */
+ body{background:var(--bg)}
+ .side{background:var(--bg-side)}
+ .card{background:var(--bg-2);border-color:var(--line-1);box-shadow:var(--sh-1)}
+ .card:hover{box-shadow:var(--sh-2)}
+ select,input[type=text],input[type=number]{background:var(--bg-3);border-color:var(--line-1)}
+ select:hover,input:hover{border-color:var(--line-2)}
+ .topbar{background:color-mix(in srgb,var(--bg) 82%,transparent);
+   border-bottom-color:var(--line-1)}
+ .task-list{background:var(--bg-inset);border-color:var(--line-1)}
+ .ev{background:var(--bg-2);border-color:var(--line-1)}
+ .split .cell,.flow .node{background:var(--bg-3);border-color:var(--line-1);
+   box-shadow:none}
+ .flow .node{background:var(--bg-2)}
+ .ev-raw pre,.ev-out pre{background:var(--bg-code);border-color:var(--line-1)}
+ .go{background:var(--brand);border-color:var(--brand);color:#0b0d13;font-weight:620}
+ .go:hover{background:var(--brand-hover);border-color:var(--brand-hover)}
+ .go:disabled{opacity:.4}
+ .hint{color:var(--fg-3)}
+ code{color:var(--fg-2)}
+ .nav button{color:var(--fg-2)}
+ .nav button.on{background:var(--brand-50);color:var(--brand);
+   box-shadow:inset 0 0 0 1px var(--brand-100)}
+ .pill{background:var(--bg-3);border-color:var(--line-2);color:var(--fg-3)}
+ .pill.accent{background:var(--brand-50);border-color:var(--brand-100);color:var(--brand)}
+ .pill.ok{background:var(--ok-bg);border-color:transparent;color:var(--ok-fg)}
+ .pill.warn{background:var(--warn-bg);border-color:transparent;color:var(--warn-fg)}
+ .pill.err{background:var(--err-bg);border-color:transparent;color:var(--err-fg)}
+ /* 主题切换按钮 */
+ .themebtn{width:32px;height:32px;border-radius:9px;border:1px solid var(--line-2);
+   background:var(--bg-2);color:var(--fg-3);cursor:pointer;font-size:14px;
+   display:inline-grid;place-items:center;transition:all var(--dur) var(--ease)}
+ .themebtn:hover{color:var(--fg);border-color:var(--line-3)}
+
+ /* ===================== 参考图那一套(运行详情页) =====================
+    出处:Vercel 的 sandbox 运行页 —— 左侧窄导航轨、顶部一排视图 tab、内容区"主列 +
+    右栏"、运行状态用一条**生命周期时间线**(每步带 +0.1s 耗时)、代码块用衬线等宽字体、
+    大量留白、几乎不用颜色(绿=成功、红=失败,其余全是灰阶)。
+
+    和我们之前那版最大的区别是**信息的组织方式**,不是配色:
+      * 每个事实一行,靠"标签 + 值"对齐,不写解释性句子;
+      * 一屏里没有长段落 —— 需要解释的东西进 title 提示或文档,不占版面;
+      * 数值(耗时、得分、文件数)一律等宽 + tabular,右对齐成一条线。 */
+ /* --- 字号整体降一档,密度提上来 --- */
+ body{font-size:13.5px;line-height:1.55}
+ /* --- 顶栏:面包屑在左,tab 居中偏左,操作在右 --- */
+ .topbar{gap:18px}
+ .crumb{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg-4);
+   white-space:nowrap}
+ .crumb b{font-weight:620;color:var(--fg)}
+ .tabs{display:flex;align-items:center;gap:2px}
+ .tabs button{background:none;border:none;padding:7px 11px;border-radius:8px;
+   font-size:13px;font-weight:520;color:var(--fg-3);cursor:pointer;
+   transition:background var(--dur) var(--ease),color var(--dur) var(--ease)}
+ .tabs button:hover{background:var(--bg-hover);color:var(--fg)}
+ .tabs button.on{background:var(--bg-3);color:var(--fg);font-weight:600}
+ html[data-theme="light"] .tabs button.on{background:var(--bg-active)}
+ /* --- 子 tab(运行详情里的 概览/日志/曲线/产物) --- */
+ .subtabs{display:flex;gap:2px;border-bottom:1px solid var(--line-1);margin:-4px 0 16px}
+ .subtabs button{background:none;border:none;padding:9px 12px;font-size:13px;
+   color:var(--fg-3);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+ .subtabs button:hover{color:var(--fg)}
+ .subtabs button.on{color:var(--fg);border-bottom-color:var(--brand);font-weight:600}
+ /* --- 卡片的标题行:小字、灰色、没有装饰 --- */
+ .card h3,.card .card-h{font-size:13px;font-weight:620;color:var(--fg-2)}
+ .card{padding:16px 18px;border-radius:11px}
+ /* --- 键值行:参考图里 Spec 那一块的做法 --- */
+ .kv{display:grid;grid-template-columns:132px minmax(0,1fr);gap:2px 14px;
+   font-size:13px;align-items:baseline}
+ .kv dt{color:var(--fg-4);white-space:nowrap}
+ .kv dd{margin:0;color:var(--fg-2);overflow-wrap:anywhere;
+   font-variant-numeric:tabular-nums}
+ .kv dd code{background:none;padding:0}
+ /* --- 生命周期:一列步骤 + 右侧耗时 --- */
+ .life{display:flex;flex-direction:column;gap:0;margin:2px 0 0}
+ .life .step{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:10px;
+   align-items:baseline;padding:6px 0;font-size:13px;border-bottom:1px solid var(--line-1)}
+ .life .step:last-child{border-bottom:none}
+ .life .dot{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--line-3);
+   justify-self:center;transform:translateY(-1px)}
+ .life .step.ok .dot{background:var(--ok);border-color:var(--ok)}
+ .life .step.run .dot{border-color:var(--brand);border-style:dashed}
+ .life .step.err .dot{background:var(--err);border-color:var(--err)}
+ .life .what{color:var(--fg-2);min-width:0;overflow-wrap:anywhere}
+ .life .dur{color:var(--fg-4);font:11.5px var(--mono);font-variant-numeric:tabular-nums}
+ .life .step.done .dur{color:var(--fg-3)}
+ /* --- 运行状态条 --- */
+ .runbar{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;
+   background:var(--ok-bg);color:var(--ok-fg);font-size:13px;border:1px solid transparent}
+ .runbar.err{background:var(--err-bg);color:var(--err-fg)}
+ .runbar.run{background:var(--brand-50);color:var(--brand)}
+ .badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;
+   border-radius:7px;border:1px solid var(--line-2);font-size:12px;color:var(--fg-2);
+   background:var(--bg-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+ .badge code{background:none;padding:0;font-size:12px}
+ /* --- 日志尾巴:等宽、暗底、单行截断 --- */
+ .logtail{background:var(--bg-code);border:1px solid var(--line-1);border-radius:9px;
+   padding:10px 12px;font:12px/1.7 var(--mono);color:var(--fg-2);max-height:220px;
+   overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+ /* 说明卡里是方法自己写的散文,用正文字体而不是等宽 —— 等宽读长句很累。 */
+ #run-notes{font:12.5px/1.7 var(--font);color:var(--fg-2);background:var(--bg-inset);
+   border-color:var(--line-1);white-space:normal}
+ /* --- 代码块:衬线等宽(参考图里那个细节),读起来像"文档"而不是"终端" --- */
+ .card pre,.ev-raw pre,.ev-out pre,.chartwrap + pre{
+   font-family:"IBM Plex Mono","JetBrains Mono",ui-monospace,"SF Mono",Menlo,
+     "Noto Serif Mono",Consolas,serif}
+ /* --- 删掉的那批解释性文字 --- */
+ .card>.hint,.card .hint.verbose{display:none}

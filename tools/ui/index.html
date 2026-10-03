@@ -1,0 +1,358 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>HarnessGrad 控制台</title>
+<script>/* 在首次绘制之前定主题,否则换主题时会先闪一下另一种底色。
+   默认**浅色**:参照的那套运行详情页是暖白底的,而且宣传截图、打印都是浅色更好看;
+   深色留给长时间盯屏(右上角 ◐ 切换,选择记在 localStorage)。 */
+(function(){try{var t=localStorage.getItem('hg-theme');
+document.documentElement.dataset.theme=(t==='dark')?'dark':'light';}
+catch(e){document.documentElement.dataset.theme='light';}})();</script><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/ui/app.css"></head><body>
+<div class="frame" id="frame">
+ <aside class="side">
+  <div class="brand">
+    <div class="mark">H</div><div class="name">HarnessGrad</div>
+  </div>
+  <nav class="nav" id="nav">
+    <button class="on" data-v="exp" onclick="view('exp',this)"><span class="ico">◧</span><span class="lbl">总览</span></button>
+    <button data-v="hist" onclick="view('hist',this)"><span class="ico">☰</span><span class="lbl">实验</span></button>
+    <button data-v="graph" onclick="view('graph',this)"><span class="ico">⑃</span><span class="lbl">版本图</span></button>
+    <button data-v="set" onclick="view('set',this)"><span class="ico">⚙</span><span class="lbl">设置</span></button>
+  </nav>
+  <div class="grow"></div>
+  <div class="foot" id="side-foot">
+    <div><span class="dot off" id="s-model"></span>模型服务</div>
+    <div><span class="dot off" id="s-runs"></span>实验记录</div>
+    <div style="padding-top:2px"><button class="collapse" onclick="toggleSide()">« 收起侧栏</button></div>
+  </div>
+ </aside>
+ <div class="main">
+  <div class="topbar">
+    <div class="crumb" id="crumb"><b>HarnessGrad</b><span>/</span><span id="crumb-leaf">跑实验</span></div>
+    <nav class="tabs" id="topnav">
+      <button class="on" data-v="exp" onclick="view('exp',this)">总览</button>
+      <button data-v="hist" onclick="view('hist',this)">实验</button>
+      <button data-v="graph" onclick="view('graph',this)">版本图</button>
+      <button data-v="set" onclick="view('set',this)">设置</button>
+    </nav>
+    <span class="grow" style="flex:1"></span>
+    <span class="sub" id="page-sub"></span>
+    <button class="gh" id="btn-setup" onclick="toggleSetup()"
+      title="展开 / 收起实验设置">⚙ 实验设置</button>
+    <button class="themebtn" id="theme-btn" onclick="toggleTheme()" title="深色 / 浅色">◐</button>
+  </div>
+  <div class="wrap" id="wrap">
+
+ <!-- ================= 实验 ================= -->
+ <div id="v-exp" class="view on">
+  <!-- 配置抽屉 + 主区。
+       W&B 的手感来自"进来先看数据,要改配置再拉开侧边":所以配置不再是首屏,而是
+       从右侧滑出的抽屉(默认收起,点右上角「配置」开),主区留给曲线和最近的实验。
+       抽屉用纯 CSS 的 class 切换,里面的 id 一个都没动 —— 表单逻辑对位置不敏感。 -->
+  <div class="wb" id="wb">
+   <div class="wb-main">
+    <!-- 主区第一屏:最近一次运行的曲线。没有运行时给一条空状态,而不是一张空图。 -->
+    <div class="card" id="home-card">
+      <div class="row" style="justify-content:space-between;align-items:baseline">
+        <h3 id="home-title">最近的实验</h3>
+        <span class="hint" id="home-meta"></span>
+      </div>
+      <div id="home-body">还没有实验记录。</div>
+    </div>
+
+    <!-- 主区第二屏:最近的实验列表(密集表格,点一行进运行详情)。 -->
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:baseline">
+        <h3>实验记录</h3>
+        <a href="#" onclick="view('hist',document.querySelector('.tabs button[data-v=\'hist\']'));return false"
+           class="hint">全部 →</a>
+      </div>
+      <table id="runs-home"><thead><tr><th>实验</th><th>方法</th><th>得分</th>
+        <th>轮</th><th>改进器</th></tr></thead><tbody></tbody></table>
+    </div>
+   </div>
+
+   <!-- 实验设置:整宽。跑起来之后自动收起(见 go()),点标题栏可以再展开。 -->
+   <section id="setup">
+    <div class="setup-head">
+      <b>实验设置</b>
+      <span class="sum" id="setup-sum"></span>
+      <span class="grow" style="flex:1"></span>
+      <button class="gh" onclick="toggleSetup(true)">展开</button>
+    </div>
+    <div class="setup-body" id="setup-body">
+  <!-- 共享配置:一行三列,高度一致。筛选做成按钮组,不再占掉一整块栅格。 -->
+  <div class="card">
+   <div class="config">
+    <div class="field"><label>基础 HARNESS</label><select id="f-harness"></select></div>
+    <div class="field"><label>任务集</label><select id="f-dataset"></select></div>
+    <div class="field"><label>模型</label><select id="f-model"></select></div>
+   </div>
+   <div class="filters">
+    <span class="fgroup" id="g-hrole"></span>
+    <span class="fgroup" id="g-henv"></span>
+    <label class="chk"><input type="checkbox" id="f-hcompat" checked> 只看能跑当前任务集的</label>
+    <span class="dim" id="f-count"></span>
+   </div>
+   <div class="hint" id="cfg-hint" style="margin-top:10px"></div>
+  </div>
+
+  <!-- 三个阶段,一眼看清这次运行由什么组成。
+       解耦(INTERFACE.md §4.49)之后,一次运行是三样东西:被改的 harness、改它的
+       改进器、以及决定"改什么/要不要"的方法。它们以前挤在"方法"一个下拉里,读者
+       分不清一个方法自带模型还是借用默认改进器 —— 于是"方法 A 比 B 强"里混着
+       "A 的提示词写得更好"。这一块把它们分开摆,并当场报出**这台机器上解析到了什么**。 -->
+  <div class="card">
+   <div class="row" style="justify-content:space-between;margin-bottom:12px">
+     <h3>组成 <span class="pill">方法 × 改进器</span></h3>
+     <span class="hint" id="split-state"></span>
+   </div>
+   <div class="flow" id="split-flow"></div>
+   <div class="hint" id="split-hint" style="margin-top:11px"></div>
+  </div>
+
+  <!-- 准备环境:这次运行还缺什么,以及一个按钮去补。
+       两件事属于不同的主人,所以分开报:任务的镜像是 89 个、约 104 GB、从 registry 拉,
+       §2.5.5 不许运行中途拉取,所以必须由人触发 —— 一个按钮正好是那个"刻意的动作";
+       harness 的依赖跟任务无关,按 (install 内容, Python 小版本) 一份,约 12 秒 / 42 MB。 -->
+  <div class="card" id="prep" style="display:none">
+   <div class="row" style="justify-content:space-between;margin-bottom:10px">
+     <b>准备这次运行的环境</b>
+     <span class="hint" id="prep-state"></span>
+   </div>
+   <div id="prep-body"></div>
+   <div class="ev" id="prep-log" style="display:none"></div>
+  </div>
+
+  <!-- train 与 eval 是两次独立的运行,所以是两个面板,并排、对称。
+       以前是一个"跑哪一侧"下拉 —— 那让"两次运行"看起来像一次运行的一个选项,
+       而它们的产物(进化 vs 一次测量)根本不同。 -->
+  <div class="duo">
+   <div class="card">
+    <h3>训练 <span class="pill accent">train</span></h3>
+    <div class="hint">进化 harness。方法每轮看到的是<b>它被打分的那些任务</b>的轨迹,
+      所以这里的分数是被拟合抬高的 —— 它是进度,不是成绩。</div>
+    <!-- 解耦之后"方法"只决定**规则**,改进器是另一件事,所以它是另一格。
+         以前这里只有"改进方法"一个下拉,于是"用哪个改进器"只能靠环境变量碰运气 ——
+         而它恰恰是每次换完最想调的那个旋钮。 -->
+    <div class="config" style="grid-template-columns:1.35fr 1.35fr 92px">
+      <div class="field"><label>改进方法</label><select id="f-method"></select></div>
+      <div class="field"><label>改进器 improver</label><select id="f-improver"></select></div>
+      <div class="field"><label>步数</label>
+        <input type="number" id="f-rounds" value="3" min="0" max="20"></div>
+      <div class="field" style="grid-column:1/-1"><label>改进器模型(留空用它自己的)</label>
+        <input type="text" id="f-imodel" placeholder="例如 gpt-6.1-sol"></div>
+    </div>
+    <div class="hint" id="imp-hint" style="margin-top:8px"></div>
+    <div class="subhead"><span>训练任务</span>
+      <span class="dim" id="train-count"></span>
+      <a href="#" onclick="pickTasks('train','side');return false">全选可跑</a>
+      <a href="#" onclick="pickTasks('train','none');return false">清空</a></div>
+    <div class="task-list" id="train-list"></div>
+    <div class="row" style="gap:8px">
+      <input type="text" id="f-runid" placeholder="实验名(自动命名)" style="flex:1;min-width:0">
+      <button class="go" id="btn-train" onclick="go('train')">开始训练</button>
+      <button class="gh" id="btn-stop" onclick="stopRun()" style="display:none">停止</button>
+    </div>
+   </div>
+
+   <div class="card">
+    <h3>考试 <span class="pill ok">eval</span></h3>
+    <div class="hint">测<b>某个训练状态</b>一次,不进化。方法不参与,所以考试题的轨迹
+      <b>结构上不在训练运行里</b>。</div>
+    <div class="config">
+      <div class="field"><label>测哪个状态</label><select id="f-fromrun"></select></div>
+    </div>
+    <div class="subhead"><span>考试任务</span>
+      <span class="dim" id="eval-count"></span>
+      <a href="#" onclick="pickTasks('eval','side');return false">全选可跑</a>
+      <a href="#" onclick="pickTasks('eval','none');return false">清空</a></div>
+    <div class="task-list" id="eval-list"></div>
+    <div class="row" style="gap:8px">
+      <input type="text" id="f-evalid" placeholder="实验名(自动命名)" style="flex:1;min-width:0">
+      <button class="go" id="btn-eval" onclick="go('eval')">开始考试</button>
+    </div>
+   </div>
+  </div>
+
+
+    </div><!-- /setup-body -->
+   </section>
+  </div><!-- /wb -->
+ </div>
+
+ <!-- ================= 运行详情 =================
+      参考图就是这一页:一条运行的状态、生命周期时间线、规格、以及右边的几个小卡。
+      曲线从"实验页的一栏"搬到这里并占满整宽 —— 它是这个平台唯一的产出,值得一整屏。 -->
+ <div id="v-run" class="view">
+  <div class="runhead">
+    <div class="row" style="gap:9px;flex-wrap:wrap;align-items:center">
+      <span class="badge" id="run-badge">●</span>
+      <b id="run-name" style="font-size:15px;letter-spacing:-.01em"></b>
+      <span class="badge" id="run-side"></span>
+      <span class="grow" style="flex:1"></span>
+      <button class="gh" id="run-replay" onclick="replay(CUR)">↻ 用这套配置重跑</button>
+    </div>
+    <div class="row" id="run-facts" style="gap:8px;flex-wrap:wrap;margin-top:9px"></div>
+  </div>
+
+  <div id="run-banner"></div>
+
+  <!-- 运行中的实时进度。它在运行详情页而不是配置抽屉里:抽屉是可以收起的,而按下
+       "开始训练"之后最需要看的东西不能跟着一起收起来。 -->
+  <div class="card" id="prog" style="display:none">
+   <div class="row" style="justify-content:space-between;align-items:baseline">
+     <b id="prog-title">运行中</b><span class="hint" id="prog-state"></span></div>
+   <div class="ev" id="prog-log">等待输出…</div>
+  </div>
+
+  <div class="card" id="curve-card" style="display:none">
+   <div class="row" style="justify-content:space-between;margin-bottom:4px">
+     <b id="curve-title">曲线</b>
+     <span class="hint" id="curve-meta"></span>
+   </div>
+   <div class="chartwrap"><svg id="chart" viewBox="0 0 900 300"
+     preserveAspectRatio="none"></svg></div>
+   <div class="steps" id="step-btns"></div>
+   <div id="step-body"></div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="row" style="justify-content:space-between;align-items:baseline">
+      <h3>每一轮</h3>
+      <span class="hint">点一行看那一轮的改动</span>
+    </div>
+    <table id="run-rounds"><thead><tr><th>轮</th><th>得分</th><th>通过</th>
+      <th>改动</th><th>harness</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="row" style="justify-content:space-between;align-items:baseline">
+      <h3>每道题</h3>
+      <span class="hint">点一道题看它的生命周期与判分理由</span>
+    </div>
+    <table id="run-tasks"><thead><tr><th>题目</th><th>得分</th><th>判分</th>
+      <th>命令</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="cols">
+    <div class="card" style="flex:1 1 460px">
+      <h3>生命周期 <span class="hint" style="font-weight:400">整轮聚合</span></h3>
+      <div class="life" id="run-life"></div>
+    </div>
+    <div class="card" style="flex:1 1 300px">
+      <h3>说明 <span class="hint" style="font-weight:400">方法自己的理由</span></h3>
+      <div id="run-notes" class="logtail" style="max-height:180px">—</div>
+    </div>
+    <div class="card" style="flex:1 1 300px">
+      <h3>日志尾巴 <span class="grow" style="flex:1"></span>
+        <a href="#" onclick="view('exp');return false" class="hint">完整输出</a></h3>
+      <div id="run-log" class="logtail">—</div>
+    </div>
+  </div>
+ </div>
+
+ <!-- ================= 任务详情 =================
+      参考图那套生命周期语言真正属于这一层:**一道题**的一次执行。运行页只能给"整轮
+      聚合",因为把 20 道题的阶段压成一条线会掩盖"哪几题在判分上烧掉了时间"。 -->
+ <div id="v-task" class="view">
+  <div class="runhead">
+    <div class="row" style="gap:9px;flex-wrap:wrap;align-items:center">
+      <span class="badge" id="task-side">—</span>
+      <b id="task-name" style="font-size:15px;letter-spacing:-.01em"></b>
+      <span class="grow" style="flex:1"></span>
+      <button class="gh" onclick="history.back()">← 返回</button>
+    </div>
+    <div class="row" id="task-facts" style="gap:8px;flex-wrap:wrap;margin-top:9px"></div>
+  </div>
+  <div id="task-body"></div>
+ </div>
+
+ <!-- ================= 历史 ================= -->
+ <div id="v-hist" class="view">
+  <!-- 一条仪表带。以前这个页面只有一张表,标题下面直接是数据行,而左栏是空的 ——
+       一个"控制台"看起来像一份导出文件。这里放四个真的从记录里数出来的数,并明说
+       哪一个**不能**拿来比较(得分列混着 train 和 exam)。 -->
+  <div class="card">
+   <div class="split" id="hist-stats"></div>
+   <div class="hint" style="margin-top:11px">
+     分数列里 train 与 exam <b>不是同一个量</b>:train 是方法读过这批题之后测的(会被抬高),
+     exam 是它没见过的题。要比较就必须同侧、同任务集、同 base model —— 版本图按这个分组。
+   </div>
+  </div>
+  <div id="compare"></div>
+  <div class="card">
+   <div class="row" style="justify-content:space-between;margin-bottom:10px">
+     <h3>全部实验</h3>
+     <span class="hint">点一行看它的曲线和每步 diff</span>
+   </div>
+   <table id="runs"><thead><tr><th>实验</th><th>Harness</th><th>方法</th><th>模型</th>
+     <th>方法模型</th><th>步数</th><th>得分</th><th>题数</th></tr></thead>
+     <tbody></tbody></table>
+  </div>
+ </div>
+
+ <!-- ================= 版本图 ================= -->
+ <div id="v-graph" class="view">
+  <div class="card">
+   <b>版本图</b>
+   <div class="hint">每个圆是一轮。<b>实线</b>是同一实验里轮次之间的链;
+     <b>虚线</b>是 eval 实验指向它所测的那个 train 轮次 —— 那就是"训练 vs 考试"这一对。
+     按 <code>(harness · base model)</code> 分泳道:<b>不同的 base model 是不同的仪器,
+     不画在一起</b>。只画记录里真实存在的边 —— 凭名字相同连线会看起来像证据。</div>
+   <div class="legend" style="margin-top:8px">
+     <span><svg width="12" height="12" style="display:inline;vertical-align:-1px">
+       <circle cx="6" cy="6" r="5" fill="#4f46e5"/></svg> 训练轮的得分</span>
+     <span><svg width="12" height="12" style="display:inline;vertical-align:-1px">
+       <circle cx="6" cy="6" r="5" fill="#12b76a"/></svg> 考试轮的得分</span>
+     <span><svg width="20" height="8" style="display:inline">
+       <path d="M0 4 L20 4" stroke="#9aa4b2" stroke-width="2"/></svg> 轮次之间的链</span>
+     <span><svg width="20" height="8" style="display:inline">
+       <path d="M0 4 L20 4" stroke="#12b76a" stroke-width="2" stroke-dasharray="5 4"/></svg>
+       eval 测的那个 train 轮次</span>
+   </div>
+   <div id="graph" style="margin-top:10px"></div>
+  </div>
+ </div>
+
+ <!-- ================= 设置 ================= -->
+ <div id="v-set" class="view">
+  <div class="card">
+   <b>模型配置</b>
+   <div class="hint">两套模型分开配置:harness 的模型决定分数,方法的模型决定改什么。
+     它们可以是同一个服务,但预算和归属是分开记录的。</div>
+  </div>
+
+  <div class="card" id="cfg-agent"></div>
+  <div class="card" id="cfg-method"></div>
+
+  <div class="card">
+   <div class="row" style="justify-content:space-between">
+     <b>本地模型服务</b>
+     <span id="svc-state" class="hint">查询中…</span>
+   </div>
+   <div class="hint">本地服务不鉴权、不花钱、响应在百毫秒级 —— 适合反复实验。
+     首次加载模型约 2 分钟。</div>
+   <div class="config" style="grid-template-columns:minmax(0,1fr);margin-top:10px">
+     <div class="field"><label>模型目录</label>
+       <select id="svc-dir"></select></div>
+   </div>
+   <div class="row" style="margin-top:10px;gap:10px;align-items:flex-end;flex-wrap:wrap">
+     <div class="field" style="width:110px"><label>端口</label>
+       <input type="number" id="svc-port" value="8001"></div>
+     <div class="field"><button class="gh" onclick="svc('start')">启动服务</button></div>
+     <div class="field"><button class="gh" onclick="svc('stop')">停止服务</button></div>
+     <div class="field"><button class="gh" onclick="svcStatus()">刷新状态</button></div>
+   </div>
+  </div>
+
+  <div class="card">
+   <div class="row">
+     <button class="go" onclick="saveSettings()">保存到 .env</button>
+     <span class="hint" id="save-msg">保存后,新启动的实验会使用这些配置</span>
+   </div>
+  </div>
+ </div>
+  </div>
+ </div>
+</div>
+<script src="/ui/app.js"></script></body></html>

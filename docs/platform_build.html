@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HarnessGrad · 平台构建说明与技术细节</title>
+<style>
+  :root{
+    --bg:#ffffff; --bg-app:#f7f8fa; --bg-side:#fbfbfd; --bg-code:#f6f7f9;
+    --fg:#101828; --fg-2:#344054; --fg-3:#667085; --fg-4:#98a2b3;
+    --line-1:rgba(16,24,40,.06); --line-2:rgba(16,24,40,.11); --line-3:rgba(16,24,40,.2);
+    --brand:#4f46e5; --brand-hover:#4338ca; --brand-50:#eef2ff;
+    --ok:#12b76a; --ok-bg:#ecfdf3; --ok-fg:#027a48;
+    --warn:#f79009; --warn-bg:#fffaeb; --warn-fg:#b54708;
+    --err:#f04438; --err-bg:#fef3f2; --err-fg:#b42318;
+    --r-1:6px; --r-2:8px; --r-3:12px; --r-4:16px; --r-pill:999px;
+    --sh-1:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --sh-2:0 4px 14px rgba(16,24,40,.07), 0 1px 3px rgba(16,24,40,.05);
+    --ease:cubic-bezier(.4,0,.2,1); --dur:.15s;
+    --mono:"SF Mono","JetBrains Mono","Fira Code",Consolas,"Liberation Mono",Menlo,monospace;
+    --side:274px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg-app);color:var(--fg);
+    font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+         "Hiragino Sans GB","Microsoft YaHei",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  code,kbd,pre{font-family:var(--mono)}
+  a{color:var(--brand);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* ---------- 布局 ---------- */
+  .frame{display:flex;min-height:100vh;align-items:flex-start}
+  aside{
+    position:sticky;top:0;flex:0 0 var(--side);width:var(--side);height:100vh;
+    overflow-y:auto;background:var(--bg-side);border-right:1px solid var(--line-2);
+    padding:22px 16px 40px;
+  }
+  .brand{display:flex;align-items:center;gap:10px;margin:0 4px 20px}
+  .mark{
+    width:28px;height:28px;border-radius:var(--r-2);flex:0 0 auto;
+    background:linear-gradient(135deg,#4f46e5,#7c74f0);color:#fff;
+    display:grid;place-items:center;font-weight:700;font-size:14px;
+    box-shadow:0 1px 2px rgba(79,70,229,.3);
+  }
+  .brand b{font-size:14.5px;font-weight:650;letter-spacing:-.01em;display:block}
+  .brand span{font-size:11.5px;color:var(--fg-4)}
+  nav a{
+    display:block;padding:6px 10px;border-radius:var(--r-2);color:var(--fg-3);
+    font-size:13px;line-height:1.5;margin-bottom:1px;
+  }
+  nav a:hover{background:rgba(16,24,40,.045);color:var(--fg);text-decoration:none}
+  nav a.on{background:var(--brand-50);color:var(--brand);font-weight:600}
+  nav .grp{
+    font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--fg-4);margin:18px 10px 6px;
+  }
+  main{flex:1 1 auto;min-width:0;padding:34px 40px 120px;max-width:1080px}
+
+  /* ---------- 排版 ---------- */
+  h1{font-size:30px;line-height:1.25;font-weight:700;letter-spacing:-.022em;margin:0 0 10px}
+  h2{
+    font-size:21px;font-weight:680;letter-spacing:-.015em;margin:52px 0 14px;
+    padding-top:22px;border-top:1px solid var(--line-2);
+  }
+  h2:first-of-type{border-top:none;padding-top:0;margin-top:0}
+  h3{font-size:16px;font-weight:650;margin:30px 0 9px;letter-spacing:-.008em}
+  h4{font-size:14px;font-weight:650;margin:20px 0 6px;color:var(--fg-2)}
+  p{margin:0 0 13px}
+  ul,ol{margin:0 0 14px;padding-left:22px}
+  li{margin:4px 0}
+  li>ul,li>ol{margin:4px 0}
+  strong{font-weight:650}
+  hr{border:none;border-top:1px solid var(--line-2);margin:34px 0}
+  .lead{font-size:16.5px;line-height:1.7;color:var(--fg-2);margin-bottom:22px}
+  .sub{color:var(--fg-4);font-size:13px}
+  code{
+    background:var(--bg-code);border:1px solid var(--line-1);border-radius:5px;
+    padding:1px 5px;font-size:12.5px;color:var(--fg-2);white-space:nowrap;
+  }
+  /* 行内代码默认不断行,免得在标识符中间断开 —— 但它绝不能把页面顶出横向滚动条:
+     一段长命令行在窄屏上会宽过正文。表格里的不在此列,那些由 .tw 的横向滚动兜住。 */
+  p code,li code,h1 code,h2 code,h3 code,h4 code,.lead code,
+  .note code,.kpi code,.sub code,.footer code,.layer code,ol.steps code{
+    white-space:normal;overflow-wrap:anywhere;
+  }
+  pre{
+    background:#0f172a;color:#e2e8f0;border-radius:var(--r-3);padding:15px 17px;
+    overflow-x:auto;font-size:12.5px;line-height:1.7;margin:0 0 16px;
+    box-shadow:var(--sh-1);
+  }
+  pre code{background:none;border:none;padding:0;color:inherit;white-space:pre}
+  pre .c{color:#8b98ad}
+  pre .k{color:#c4b5fd}
+  pre .s{color:#86efac}
+  pre .n{color:#fbbf24}
+  pre .err{color:#fca5a5;font-weight:600}
+
+  /* ---------- 卡片 ---------- */
+  .card{
+    background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-3);
+    padding:20px 22px;margin:0 0 16px;box-shadow:var(--sh-1);
+  }
+  .card>h3:first-child,.card>h4:first-child{margin-top:0}
+  .card.flush{padding:0;overflow:hidden}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:1000px){.g2,.g3{grid-template-columns:1fr}}
+  .kpi{
+    background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-3);
+    padding:14px 16px;box-shadow:var(--sh-1);
+  }
+  .kpi b{display:block;font-size:23px;font-weight:700;letter-spacing:-.02em;
+    font-variant-numeric:tabular-nums}
+  .kpi span{font-size:12.5px;color:var(--fg-4)}
+  .kpi .u{font-size:13px;font-weight:500;color:var(--fg-3);margin-left:2px}
+
+  /* ---------- 表格 ---------- */
+  table{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px;
+    background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-3);
+    overflow:hidden;margin:0 0 16px}
+  th{
+    text-align:left;font-weight:650;font-size:12px;color:var(--fg-3);
+    letter-spacing:.02em;padding:10px 13px;background:var(--bg-code);
+    border-bottom:1px solid var(--line-2);white-space:nowrap;
+  }
+  td{padding:10px 13px;border-bottom:1px solid var(--line-1);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td code{white-space:nowrap}
+  .tw{overflow-x:auto}
+
+  /* ---------- 小件 ---------- */
+  .pill{
+    display:inline-flex;align-items:center;gap:5px;padding:2px 9px;
+    border-radius:var(--r-pill);font-size:11.5px;font-weight:550;
+    border:1px solid var(--line-2);color:var(--fg-3);white-space:nowrap;
+    vertical-align:1px;
+  }
+  .pill.ok{color:var(--ok-fg);border-color:rgba(18,183,106,.24);background:var(--ok-bg)}
+  .pill.warn{color:var(--warn-fg);border-color:rgba(247,144,9,.26);background:var(--warn-bg)}
+  .pill.err{color:var(--err-fg);border-color:rgba(240,68,56,.24);background:var(--err-bg)}
+  .pill.mute{color:var(--fg-4)}
+  .pill.accent{color:var(--brand);border-color:rgba(79,70,229,.22);background:var(--brand-50)}
+
+  .note{
+    border-left:3px solid var(--brand);background:var(--brand-50);
+    border-radius:0 var(--r-2) var(--r-2) 0;padding:12px 16px;margin:0 0 16px;
+    font-size:13.5px;line-height:1.7;color:var(--fg-2);
+  }
+  .note.warn{border-color:var(--warn);background:var(--warn-bg)}
+  .note.err{border-color:var(--err);background:var(--err-bg)}
+  .note b{color:var(--fg);font-weight:650}
+  .note :last-child{margin-bottom:0}
+  .note p{margin-bottom:8px}
+
+  .flow{
+    background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-3);
+    padding:18px 20px;margin:0 0 16px;overflow-x:auto;
+  }
+  .flow pre{background:none;color:var(--fg-2);box-shadow:none;padding:0;margin:0;
+    font-size:12.5px;line-height:1.85}
+  .flow pre .hi{color:var(--brand);font-weight:600}
+  .flow pre .dim{color:var(--fg-4)}
+
+  .layers{display:grid;gap:0}
+  .layer{
+    display:grid;grid-template-columns:132px 1fr;gap:16px;
+    padding:14px 0;border-bottom:1px solid var(--line-1);
+  }
+  .layer:last-child{border-bottom:none}
+  .layer>b{font-size:13px;font-weight:650;color:var(--fg)}
+  .layer>div{font-size:13.5px;color:var(--fg-2)}
+  .layer>div p{margin:0 0 6px}
+  .layer>div p:last-child{margin-bottom:0}
+
+  ol.steps{counter-reset:s;list-style:none;padding-left:0;margin:0 0 16px}
+  ol.steps>li{
+    counter-increment:s;position:relative;padding:7px 0 7px 42px;
+    border-bottom:1px solid var(--line-1);font-size:13.5px;
+  }
+  ol.steps>li:last-child{border-bottom:none}
+  ol.steps>li::before{
+    content:counter(s);position:absolute;left:0;top:7px;
+    width:24px;height:24px;border-radius:var(--r-pill);background:var(--brand-50);
+    color:var(--brand);font-size:11.5px;font-weight:700;
+    display:grid;place-items:center;
+  }
+  .tags{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+  .footer{
+    margin-top:60px;padding-top:20px;border-top:1px solid var(--line-2);
+    color:var(--fg-4);font-size:12.5px;
+  }
+  @media(max-width:900px){
+    aside{display:none}
+    main{padding:22px 18px 80px}
+  }
+</style>
+</head>
+<body>
+<div class="frame">
+
+<aside>
+  <div class="brand">
+    <div class="mark">H</div>
+    <div><b>HarnessGrad</b><span>平台构建说明</span></div>
+  </div>
+  <nav id="toc">
+    <a href="#what">这是什么</a>
+    <a href="#boundary">分工边界</a>
+    <div class="grp">架构</div>
+    <a href="#layout">代码布局</a>
+    <a href="#flow">一次运行的流程</a>
+    <a href="#objects">三个对象</a>
+    <div class="grp">契约与技术细节</div>
+    <a href="#exchange">交换单位与清单</a>
+    <a href="#split">一次运行只关于一侧</a>
+    <a href="#record">曲线点记录什么</a>
+    <a href="#envs">两种环境：files / exec</a>
+    <a href="#state">容器状态：commit 后验证</a>
+    <a href="#services">服务与模型网关</a>
+    <a href="#integrity">完整性：检测而非假设</a>
+    <a href="#refusal">拒绝路径必须可见</a>
+    <a href="#oracle">对照与可达性</a>
+    <div class="grp">方法与适配</div>
+    <a href="#methods">方法的接口</a>
+    <a href="#adapters">九个适配器的发现</a>
+    <a href="#tb">Terminal-Bench 接入</a>
+    <div class="grp">验证与边界</div>
+    <a href="#tests">测试分层</a>
+    <a href="#defects">构建中修掉的真缺陷</a>
+    <a href="#notdesigned">尚未设计的东西</a>
+  </nav>
+</aside>
+
+<main>
+
+<h1>HarnessGrad：这个平台是怎么搭的</h1>
+<p class="sub" style="margin:0 0 14px">
+  这份是<strong>技术细节版</strong>，写给已经知道这个项目、要看实现理由的人。
+  第一次接触的话，先看 <a href="intro.html">docs/intro.html</a> —— 一页纸的定位与核心概念。
+</p>
+<p class="lead">
+  一句话：<strong>我们不提出一个 RSI 方法，我们造那台让 RSI 方法可以互相比较的仪器。</strong>
+  所以平台拥有「测量」，而把「怎么改进 harness」完整地留给外部。下面记录的是这台仪器的
+  构造方式、每条规则背后的理由，以及哪些结论是<em>实测</em>出来的而不是推定的 ——
+  这个区分在这个项目里是硬要求，因为它决定了哪句话可以被引用。
+</p>
+
+<div class="grid g3" style="margin-bottom:26px">
+  <div class="kpi"><b>9<span class="u">个</span></b><span>平台自有模块（<code>eval/</code>）</span></div>
+  <div class="kpi"><b>316<span class="u">例</span></b><span>质量测试（314 通过 / 2 跳过）</span></div>
+  <div class="kpi"><b>1695<span class="u">行</span></b><span>冻结的接口契约 <code>INTERFACE.md</code></span></div>
+</div>
+
+<h2 id="what">这是什么</h2>
+
+<p>
+  每一个 harness 自进化方法都报告一个最终分数增量。没有一种能说清那个增量<em>是由什么构成的</em>，
+  也没有一种把它报在一条能和别的方法对比的曲线上。这个领域缺一个共同的训练信号。
+</p>
+
+<div class="card">
+  <h3>HarnessGrad 定义的那个信号</h3>
+  <p style="margin-bottom:8px">一个 base harness · 一个固定的任务集 · 一个采样循环，以及一个曲线点，记录：</p>
+  <ul style="margin-bottom:0">
+    <li>harness 状态（<code>harness.json</code> 的 sha，以及它在 git 里的提交）</li>
+    <li>涉及的两个模型 —— <strong>agent 模型</strong>（决定分数）与 <strong>方法模型</strong>（决定改什么）</li>
+    <li>分数与 95% 置信区间，以及是在几道题上测的</li>
+    <li>拿到这个分数花掉的算力（token、wall clock、评测次数）</li>
+  </ul>
+</div>
+
+<h2 id="boundary">分工边界</h2>
+
+<p>
+  整个设计只有一条不能让步的线：<strong>评分不可委托</strong>。一个自己给自己打分的主体，
+  会让所有跨方法比较同时失效 —— 它不是在被测量，它是在给自己批卷子。
+</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>平台拥有</th><th>Harness（及其方法）拥有</th></tr></thead>
+  <tbody>
+    <tr><td>跑哪些题、跑几轮</td><td>从轨迹里读任何它想读的东西</td></tr>
+    <tr><td>执行 harness、收集轨迹</td><td>决定怎么修改 harness</td></tr>
+    <tr><td><strong>全部评分</strong></td><td>—</td></tr>
+    <tr><td>每一个曲线点、ckpt 与 token 计数</td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  这条线在代码里的体现是 <code>PLATFORM</code> 这个元组 —— 它同时也是完整性校验的名单：
+</p>
+
+<pre><code><span class="c"># eval/integrity.py</span>
+PLATFORM = (<span class="s">"driver.py"</span>, <span class="s">"eval"</span>, <span class="s">"ckpt"</span>, <span class="s">"data"</span>, <span class="s">"tools"</span>, <span class="s">"methods"</span>,
+            <span class="s">"tests"</span>, <span class="s">"docs"</span>, <span class="s">"INTERFACE.md"</span>, <span class="s">".env"</span>)</code></pre>
+
+<div class="note">
+  <p><b><code>base_harness/</code> 故意不在这份名单里。</b>它是候选者，不是裁判：每次运行都先把它复制进工作区，
+  被编辑的是那份副本。把它列进来会让「平台唯一要做的那次写入」被标成篡改。</p>
+</div>
+
+<h2 id="layout">代码布局</h2>
+
+<div class="tw">
+<table>
+  <thead><tr><th>路径</th><th>规模</th><th>职责</th></tr></thead>
+  <tbody>
+    <tr><td><code>driver.py</code></td><td>2067 行</td><td>入口、门禁、采样循环、曲线写出</td></tr>
+    <tr><td><code>INTERFACE.md</code></td><td>1695 行</td><td>冻结的契约 <span class="pill mute">v0.1 FROZEN</span></td></tr>
+    <tr><td><code>eval/</code></td><td>9 个模块</td><td>平台自有的测量层，见下表</td></tr>
+    <tr><td><code>data/</code></td><td>9 个数据集</td><td>任务、初始状态、评分器、环境声明</td></tr>
+    <tr><td><code>ckpt/</code></td><td>2 个模块</td><td>用 git 支撑的 harness 状态</td></tr>
+    <tr><td><code>base_harness/</code></td><td>5 个</td><td>可被进化的起点（其中 <code>oracle</code> 是对照）</td></tr>
+    <tr><td><code>methods/</code></td><td>13 个</td><td>外部方法 + 共用的编辑器</td></tr>
+    <tr><td><code>adapters/</code></td><td>17 个文件</td><td>把已发表方法接进来的移植层</td></tr>
+    <tr><td><code>tools/</code></td><td>15 个</td><td>导入镜像、画曲线、看实验的控制台</td></tr>
+    <tr><td><code>tests/quality/</code></td><td>24 个文件 / 316 例</td><td>把上面每一条规则钉住</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3><code>eval/</code> 里的九个模块</h3>
+
+<div class="card">
+  <div class="layers">
+    <div class="layer"><b>runner.py</b><div><p>在任务集上执行 harness。平台自有（§0）。</p></div></div>
+    <div class="layer"><b>metrics.py</b><div><p>评分与任务集选择。<strong>方法永远看不到这个模块。</strong></p></div></div>
+    <div class="layer"><b>sandbox.py</b><div><p><code>bwrap</code> 挂载命名空间：平台通过<em>不被挂载</em>而消失，而不是靠检查。</p></div></div>
+    <div class="layer"><b>container.py</b><div><p><code>exec</code> 环境的第二道独立边界：docker 原语层。</p></div></div>
+    <div class="layer"><b>services.py</b><div><p>与任务并行的服务容器。负责<em>顺序与规则</em>，原语仍来自 container。</p></div></div>
+    <div class="layer"><b>modelgate.py</b><div><p>把 harness 的模型端点发布到任务的内网（§2.5.7）。</p></div></div>
+    <div class="layer"><b>integrity.py</b><div><p>自哈希：让一次运行不能悄悄让自己失效。</p></div></div>
+    <div class="layer"><b>console.py</b><div><p>同时写人类文本与 <code>events.jsonl</code>，两种读者看到同一件事。</p></div></div>
+    <div class="layer"><b>__init__.py</b><div><p>包边界。</p></div></div>
+  </div>
+</div>
+
+<h2 id="flow">一次运行的流程</h2>
+
+<div class="flow"><pre>
+  <span class="dim">① 门口（任何东西被支付之前）</span>
+    模型可用性检查          <span class="dim">backend 是 live 但 key 没配 → 每个分数都会来自一个够不到模型的 harness</span>
+    加载数据集 + split      <span class="hi">按侧别收窄 —— 另一侧从此不在这次运行里</span>
+    能力门禁 env_kinds      <span class="dim">harness 声明不了的任务,提前拒绝(见 §拒绝路径)</span>
+    镜像摘要解析            <span class="hi">§2.5.4:解析不出 digest 就拒绝启动</span>
+    容器/沙箱边界构建        <span class="dim">边界建不起来就停,绝不静默降级成主机上跑</span>
+    工作区在平台之外         <span class="dim">拒绝任何让 harness 能用 .. 走到平台的路径</span>
+
+  <span class="dim">② round 0：基线</span>
+    commit H0 → 在工作区里评测 → 写曲线点 → 保存 state_after_round0/
+
+  <span class="dim">③ 每一轮</span>
+    调用方法(子进程) → 拿到候选 harness → <span class="hi">平台自己测量</span>
+    → 写 state_after_roundN/ → 曲线点追加一行(立即落盘)
+
+  <span class="dim">④ 出口</span>
+    curve.jsonl / events.jsonl / traces / launch.json / console.log
+</pre></div>
+
+<p>
+  曲线点是<strong>逐条追加并立即落盘</strong>的，不是最后一次性写出。一次被中断的运行曾经会在磁盘上
+  留下<em>上一次</em>运行的 <code>curve.jsonl</code>，于是控制台画出一条属于另一次运行的曲线。
+</p>
+
+<h2 id="objects">三个对象</h2>
+
+<div class="grid g3">
+  <div class="card">
+    <h4>harness</h4>
+    <p class="sub" style="margin:0">一个<strong>能独立解一道题</strong>的目录。它是被进化的东西。
+    用 git 做状态：commit 是检查点，prefix 是回滚，相同 prefix 天然去重。</p>
+  </div>
+  <div class="card">
+    <h4>method</h4>
+    <p class="sub" style="margin:0">一个<strong>外部</strong>进程。它拿到一份干净的 base harness 副本，
+    产出候选 harness；平台再自己去测那些候选。</p>
+  </div>
+  <div class="card">
+    <h4>agent = harness + model</h4>
+    <p class="sub" style="margin:0">被测量的对象是两个东西的组合。所以曲线点必须同时记录
+    harness 的 sha 与 agent 模型的标识。</p>
+  </div>
+</div>
+
+<h3>为什么方法必须在 harness 之外</h3>
+
+<div class="note">
+  <p>最早的设计把方法放在 harness <em>内部</em>。那让它和一件产物绑死：它只能改进它自带的那只 harness，
+  而两个方法无法比较，因为它们面对的是不同的起点。</p>
+  <p style="margin-bottom:0">把方法放到外面，才让「同一个方法用在任意 base harness 上」成为可能 ——
+  也正因如此，方法不再能是<em>被测量对象</em>的一部分。</p>
+</div>
+
+<p>
+  方法通过<strong>子进程</strong>调用，永远不 <code>import</code>。这不是风格选择：一个被 import 的模块在加载时
+  就被冻结了，而这个平台存在的意义正是测量一只<strong>会重写自己改进机制</strong>的 harness。
+  import 不会让那种情况变复杂，它会让那种情况<em>无法被表达</em>。
+</p>
+
+<h2 id="exchange">交换单位与清单</h2>
+
+<p>交换单位是<strong>整个 harness 仓库</strong>，不是一段代码。它必须自己声明自己：</p>
+
+<pre><code><span class="c">// harness.json —— 清单（必需）</span>
+{
+  <span class="s">"name"</span>: <span class="s">"loop"</span>,
+  <span class="s">"version"</span>: <span class="s">"0.2.0"</span>,
+  <span class="s">"entrypoint"</span>: [<span class="s">"python3"</span>, <span class="s">"agent.py"</span>],
+  <span class="s">"env_kinds"</span>: [<span class="s">"files"</span>, <span class="s">"exec"</span>],   <span class="c">// 它能在什么环境里工作</span>
+  <span class="s">"role"</span>: <span class="s">"harness"</span>            <span class="c">// 或者 "control"</span>
+}</code></pre>
+
+<h3>harness 是一条命令，不是一种语言</h3>
+
+<p>
+  入口是 <code>argv</code> 数组，不是「一个 Python 函数」。所以一只用 shell、Go 或 Rust 写的 harness
+  和一只 Python harness 在这个平台上是同一等公民 —— 平台只负责在正确的环境里执行那条命令。
+</p>
+
+<h2 id="split">一次运行只关于一侧 <span class="pill accent">§2.6</span></h2>
+
+<p>
+  这是最近一次重要的契约修订，也是整个评测可信度的承重墙。
+</p>
+
+<div class="grid g2">
+  <div class="card">
+    <h4><span class="pill accent">train</span> 训练运行</h4>
+    <p class="sub">方法看得到轨迹，用来自我诊断。<strong>分数会被拟合抬高</strong> —— 它是进度，不是成绩。</p>
+  </div>
+  <div class="card">
+    <h4><span class="pill ok">eval</span> 考试运行</h4>
+    <p class="sub">测某个训练状态一次，方法完全不参与。考试题的轨迹<strong>结构上不在训练运行里</strong>。</p>
+  </div>
+</div>
+
+<p>收窄是<em>结构性的</em>，不是靠一层字段遮蔽：</p>
+
+<pre><code><span class="c"># driver.py</span>
+<span class="c"># 另一侧从不被加载、从不被评测、它的轨迹从不被写出。于是</span>
+<span class="c"># 「方法看不到考试」不再是一个平台扣住的字段,而是根本不在这</span>
+<span class="c"># 次运行里的一侧。</span>
+side_ids = list(split[args.side])
+tasks_all = [t <span class="k">for</span> t <span class="k">in</span> tasks_all <span class="k">if</span> t[<span class="s">"task_id"</span>] <span class="k">in</span> set(side_ids)]
+setups, verifiers, envs = _narrow_to_run(setups, verifiers, envs, side_ids)</code></pre>
+
+<div class="note err">
+  <p><b>这一行曾经是漏的。</b>收窄只作用在任务清单上，而 <code>load_envs</code> / <code>load_tasks</code>
+  读的是<em>整个数据集</em>，于是三个表里都留着另一侧的条目。后果是实测到的：
+  <code>--side train --tasks break-filter-js-from-html</code> 被一道 <strong>eval 侧</strong>题目的缺失镜像
+  <code>alexgshaw/mteb-leaderboard:20251031</code> 拒掉了 —— 一次根本不会碰它的运行。</p>
+  <p style="margin-bottom:0">被拒绝的读法不是「少了一个镜像」，而是「<em>它无视了我选的题</em>」，这比拒绝本身更糟。</p>
+</div>
+
+<h3>eval 运行指向它测的那个状态</h3>
+
+<pre><code>{
+  <span class="s">"side"</span>: <span class="s">"eval"</span>,
+  <span class="s">"score_kind"</span>: <span class="s">"exam"</span>,
+  <span class="s">"evaluated_from"</span>: {
+    <span class="s">"run_id"</span>: <span class="s">"ui-train"</span>,
+    <span class="s">"round"</span>: 1,
+    <span class="s">"harness_sha"</span>: <span class="s">"87f9412d234876edca9002008183a769b3d1383c"</span>
+  }
+}</code></pre>
+
+<div class="note warn">
+  <p style="margin-bottom:0"><b>连接键是 <code>evaluated_from.harness_sha</code>，不是这个 eval 点自己的
+  <code>identity.harness_sha</code>。</b>原因是实测的：eval 会重新提交它暂存的状态，于是拿到一个不同的 sha
+  （量到 <code>87f9412d…</code> 对 <code>8748bb05…</code>）。用后者去连线会连不上任何东西。</p>
+</div>
+
+<p>
+  为了让 eval 有东西可指，每一轮的状态都以 <code>runs/&lt;id&gt;/state_after_round&lt;N&gt;/</code> 落盘，
+  <strong>round 0 也包括</strong> —— 「在考试上测 H0」是后面每一次 eval 的读数基准。
+</p>
+
+<h2 id="record">曲线点记录什么</h2>
+
+<p>曲线点会被写进<em>方法能读的通道</em>，所以这里每多一个字段都是一次泄漏面的扩大。</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>字段</th><th>为什么它在</th><th>为什么别的字段不在</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>identity.harness_sha</code></td>
+      <td>状态是测量对象的身份</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td><code>agent_model</code> / <code>method_model</code></td>
+      <td>两个模型，分开记账；换模型就是换仪器</td>
+      <td>曾经只记一个 <code>mock</code>，而真实模型在回答每一道题</td>
+    </tr>
+    <tr>
+      <td><code>score</code> + 95% CI + <code>n_tasks</code></td>
+      <td>没有区间的分数不可比较</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td><code>env.image_digest</code></td>
+      <td>§2.5.4：tag 会移动，digest 不会</td>
+      <td>只写 tag 等于把「不可复现」写成了「可复现」</td>
+    </tr>
+    <tr>
+      <td><code>verifier_kinds</code></td>
+      <td>只记验证器的<strong>种类</strong>（<code>answer</code> / <code>command</code>）</td>
+      <td><strong>绝不记</strong>它的 <code>argv</code> 或 <code>expected</code> —— 那等于把方法正在被怎么评分告诉它</td>
+    </tr>
+    <tr>
+      <td><code>measured_by_platform</code></td>
+      <td>区分「平台测的」与「方法自己报的」</td>
+      <td>缺这个字段会让记录声称分数是方法自己给的 —— 与事实相反</td>
+    </tr>
+    <tr>
+      <td><code>editable_surface_touched</code></td>
+      <td>从 <code>git diff</code> 读出，不是方法自报</td>
+      <td><code>method/accept.py</code> 出现在这里意味着方法改写了自己的<em>接受规则</em></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note">
+  <p style="margin-bottom:0"><b>平台没有「真 RSI」模式。</b>一个声明的模式只是自述；「真/伪」的区别是一次<em>读数</em>，
+  不是一个设置项。所以 <code>editable_surface_touched</code> 是读出来的：
+  <code>[]</code> 是只返回原样的对照，<code>['agent.py']</code> 是真的改了 harness。</p>
+</div>
+
+<h2 id="envs">两种环境：<code>files</code> 与 <code>exec</code></h2>
+
+<div class="grid g2">
+  <div class="card">
+    <h4><code>files</code></h4>
+    <p class="sub" style="margin-bottom:8px">任务的文件是一个<strong>宿主目录</strong>，绑定挂载进容器。</p>
+    <ul class="sub" style="margin:0">
+      <li>平台隐藏方式：<em>不被挂载</em>（bwrap 命名空间）</li>
+      <li>运行时：宿主自己的解释器</li>
+      <li>验证容易：平台能读、能冻结产物</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4><code>exec</code></h4>
+    <p class="sub" style="margin-bottom:8px">任务的状态在<strong>容器自己的文件系统里</strong>。</p>
+    <ul class="sub" style="margin:0">
+      <li>平台隐藏方式：同样不被挂载 —— 这是<em>第二道独立边界</em>，不是替代品</li>
+      <li>运行时、解释器、工具都是镜像的</li>
+      <li><code>network: none</code> 才成为可能：容器有自己的网络命名空间</li>
+    </ul>
+  </div>
+</div>
+
+<p>环境是声明出来的，连同资源与超时：</p>
+
+<pre><code>ENV = {<span class="s">"t01"</span>: {<span class="s">"kind"</span>: <span class="s">"exec"</span>, <span class="s">"image"</span>: <span class="s">"..."</span>, <span class="s">"workdir"</span>: <span class="s">"/app"</span>,
+               <span class="s">"state"</span>: <span class="s">"container"</span>,        <span class="c"># 默认 "mount"</span>
+               <span class="s">"network"</span>: <span class="s">"bridge"</span>,
+               <span class="s">"cpus"</span>: 1, <span class="s">"memory_mb"</span>: 2048,
+               <span class="s">"agent_timeout_s"</span>: 900, <span class="s">"verify_timeout_s"</span>: 900,
+               <span class="s">"services"</span>: []}}</code></pre>
+
+<h2 id="state">容器状态：commit，然后在一个全新容器里验证 <span class="pill accent">§2.5.9</span></h2>
+
+<p>
+  Terminal-Bench 不是 <code>mount</code> 的形状：它的任务在自己的镜像里设 <code>WORKDIR /app</code>，
+  harness <strong>在容器的文件系统里</strong>工作。实测：镜像里 <code>/app</code> 是空的，指令说往
+  <code>/app/ars.R</code> 写，检查读 <code>/app</code>。用绑定挂载会把任务放到任务自己没放的地方。
+</p>
+
+<div class="card">
+  <h3 style="margin-bottom:12px">十步</h3>
+  <ol class="steps">
+    <li>从已固定摘要的镜像启动任务容器；<strong>不做 workdir 绑定挂载</strong></li>
+    <li>把 <code>SETUP</code> 拷进去（<code>docker cp</code>）—— 多数容器状态任务把环境装在镜像里，不需要这一步</li>
+    <li>运行 harness，<code>--workdir</code> 指向容器自己的工作目录</li>
+    <li>harness 停止 → <code>docker commit</code> → 得到一个快照镜像</li>
+    <li>从快照启动一个<strong>全新</strong>容器</li>
+    <li>把 <code>VERIFY</code> 的输入拷到容器内的路径 &nbsp;<span class="sub">← harness 从没见过它们</span></li>
+    <li>创建存放 <code>reward_file</code> 的目录 &nbsp;<span class="sub">← 也没见过这个</span></li>
+    <li>运行检查</li>
+    <li>从 <code>reward_file</code> 读分数</li>
+    <li>删除快照镜像与任务容器</li>
+  </ol>
+</div>
+
+<p>为什么这样能满足 §2.2 的三条不变量 —— 「提交整个文件系统」听起来像是「重新物化输入」的反面：</p>
+
+<div class="layers">
+  <div class="layer"><b>检查的输入</b><div><p>是 tests，在第 6 步、harness 停止<em>之后</em>才拷进来。
+  它们从不在镜像里，也从不在 harness 运行过的那个容器里。实测：真实的 Terminal-Bench 镜像里
+  <strong>完全没有 <code>/tests</code></strong>，是平台在做这次拷贝。</p></div></div>
+  <div class="layer"><b>任务状态</b><div><p><code>/app</code> 以及 harness 碰过的任何东西，本来<em>就该</em>由 harness 控制 ——
+  那正是被评分的东西。快照是它被运送的方式。</p></div></div>
+  <div class="layer"><b>快照是不可变的</b><div><p>它是一个<strong>镜像</strong>。检查跑在它的一个可写<em>副本</em>上，
+  检查写的任何东西随那个容器一起消失。检查无法改动它正在评分的东西。</p></div></div>
+  <div class="layer"><b>比原版更严</b><div><p>全新容器比 Terminal-Bench 自己的 runner 更严格 ——
+  后者在 agent 待过的同一个容器里跑测试，于是 agent 放到后台的任何进程都被 reparent 到 PID 1，仍然在那里。
+  从快照起步让 §2.5.6 的保证在这里也成为<em>结构性</em>的，而不是尽力而为。</p></div></div>
+</div>
+
+<div class="note">
+  <p style="margin-bottom:0"><b>用 <code>docker commit</code> 而不是把 <code>/app</code> 拷出来</b>，
+  因为检查可能读 <code>/app</code> 之外的地方 —— 实测：真实任务集在六处引用 <code>/tmp/frame.bmp</code>，
+  所以有一部分任务的产物放在只拷 <code>/app</code> 会丢掉的位置。</p>
+</div>
+
+<h3>谁的解释器在跑 harness</h3>
+
+<p>
+  镜像里有解释器就用<strong>镜像的</strong>，否则用<strong>平台的</strong>。两半都是必需的：
+  §2.5.3 说在环境里跑 harness 的理由是「<code>bash</code>、文件编辑器和<em>解释器</em>都是镜像的」；
+  但任务镜像不保证有解释器 —— 真实的那个是 <code>ubuntu:24.04</code> 加一个 <code>COPY</code>，
+  没有 <code>python3</code>、没有 <code>R</code>、没有 <code>gcc</code>。
+</p>
+
+<h2 id="services">服务与模型网关</h2>
+
+<p>
+  一个<em>服务</em>是模拟 API、数据库、浏览器或模拟用户 —— 必须在 harness 运行时<strong>同时</strong>活着，
+  且只能从任务环境内部到达。三条规则就是全部设计：
+</p>
+
+<ul>
+  <li><strong>每个任务一个 <code>--internal</code> 网络。</strong>不是每个运行一个 —— 任务 <em>N</em> 的服务
+  不能被任务 <em>N+1</em> 到达。共享网络会让每个任务都变成「有网络的任务」。</li>
+  <li><strong>生命周期跟随任务</strong>，不跟随运行。</li>
+  <li><strong>镜像同样固定摘要。</strong>一个被重新打过 tag 的 mock API 就是另一道题。</li>
+</ul>
+
+<h3>模型网关：容器里的 harness 怎么够到宿主上的模型</h3>
+
+<p>明显的那几条路全部失败，而且是量过的：</p>
+
+<pre><code>container → 127.0.0.1:8001           <span class="c"># 容器自己的 loopback</span>
+container → 172.17.0.1:8001          <span class="c"># 网桥网关;vLLM 只绑 loopback,那里没人监听</span>
+container → host.docker.internal     <span class="c"># Linux 上默认没定义</span>
+internal  → &lt;它自己的网关&gt;:8001      <span class="c"># 同上,没人监听</span></code></pre>
+
+<div class="note err">
+  <p style="margin-bottom:0"><b>错误的答案是 <code>--network bridge</code>。</b>那会让任务拿到互联网，
+  而「一个有网络的任务和一个没网络的任务不是同一个任务」（§2.5.4）——
+  一道 <code>exec</code> 任务会因为平台<em>投递模型的方式</em>而悄悄变成一道联网任务。
+  正确的做法是在宿主侧起一个转发器，绑到那个内网自己的网关上。</p>
+</div>
+
+<h2 id="integrity">完整性：能执行的就执行，剩下的靠检测</h2>
+
+<p>
+  要让一次测量说明点什么，有两件事必须成立，而操作系统两件都不管。两条都是在这台平台上<em>测出来</em>的，
+  办法是跑一只入口会探测自己周围环境并汇报的 harness：
+</p>
+
+<pre><code>up1/driver.py, up2/driver.py            <span class="c">absent</span>      <span class="c"># `..` 上爬被关掉了</span>
+abs /…/HarnessGrad/.env                 <span class="err">READABLE</span>
+abs /…/HarnessGrad/driver.py            <span class="err">READABLE</span>
+abs /…/HarnessGrad/eval/metrics.py      <span class="err">READABLE</span>
+write /…/HarnessGrad/_probe             <span class="err">WROTE</span></code></pre>
+
+<p>
+  只要主体以同一个用户运行，<strong>绝对路径仍然够得到一切</strong>。所以第二半是检测，
+  而保证实际上就住在这里 —— 平台在<em>每一次方法调用</em>和<em>每一次评测</em>前后对自己的文件做哈希，
+  任何东西动了就<strong>让这次运行失败，并指名路径</strong>。
+</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>主张</th><th>状态</th></tr></thead>
+  <tbody>
+    <tr><td>harness 不能靠 <code>..</code> 够到平台</td><td><span class="pill ok">强制执行</span> 工作区被搬到平台之外</td></tr>
+    <tr><td>harness 完全够不到平台</td><td><span class="pill warn">检测</span> 每次运行哈希</td></tr>
+    <tr><td>方法完全够不到平台</td><td><span class="pill warn">检测</span> 每次调用哈希</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>
+  三种主张、三种状态，是<em>故意</em>分开的。把它们都写成「已保证」会让这个平台最容易被误引用的那句
+  变成假话。
+</p>
+
+<h2 id="refusal">拒绝路径必须可见</h2>
+
+<p>
+  这个平台有大量「拒绝启动」的分支 —— <code>driver.py</code> 里 18 处 <code>return 2</code> 加
+  23 条 error 级事件。设计约束是：<strong>拒绝永远不能是静默的</strong>。一次静默降级产生的数字，
+  含义和它自己声称的不是一回事，那是这个项目能犯的最贵的错。
+</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>情形</th><th>平台的回答</th></tr></thead>
+  <tbody>
+    <tr><td>镜像不在本地</td><td>拒绝启动。平台<strong>不在运行中途拉取任何东西</strong> —— 跑一半才发现要联网，会让「这次运行为什么停了」变成一个没法回答的问题</td></tr>
+    <tr><td>解析不出 digest</td><td>拒绝启动（§2.5.4：没有摘要就没有运行）</td></tr>
+    <tr><td>harness 声明不了任务集需要的环境种类</td><td>拒绝，<strong>并且排在最前</strong> —— 这是「导入什么都没用」的那种失败，和「差一个镜像」不是一类</td></tr>
+    <tr><td>沙箱边界建不起来</td><td>拒绝，<strong>绝不</strong>降级成 <code>--no-sandbox</code></td></tr>
+    <tr><td>工作区落在平台树里</td><td>拒绝 —— 那让 <code>..</code> 又能上爬了</td></tr>
+    <tr><td>没有任何任务产出可评分结果</td><td>拒绝，而不是记一个 0.0：<code>mean([])</code> 是 0.0，那会在一只 harness 根本没跑过的运行上写「它得了零分」</td></tr>
+    <tr><td>跑了太少题</td><td>照跑，但显式说出来：会打印这次运行的最小分差步长（例如 2 题 → 0.500）</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note warn">
+  <p style="margin-bottom:0">那条关于题数的提示，文案本身就错过一次：它曾经写 <code>eval side is N tasks</code>，
+  而 <code>N</code> 是<strong>这次运行自己</strong>评分的题数。于是一次单题的 train 运行会宣布
+  「eval side is 1 tasks」—— 而考试侧有 37 题。一个关于错误对象的测量，读起来比没有提示更糟。</p>
+</div>
+
+<h2 id="oracle">对照与可达性</h2>
+
+<p>
+  <code>base_harness/oracle</code> 的 <code>role</code> 是 <code>control</code>。它不改进任何东西 ——
+  它运行<strong>数据集自带的参考解</strong>。
+</p>
+
+<div class="card">
+  <h4>它回答的问题不是「harness 好不好」，而是「这道题在这里够不够得着」</h4>
+  <p class="sub" style="margin-bottom:0">如果 oracle 也拿不到分，那么这道题<em>谁也拿不到</em>，
+  而任何关于 harness 的结论都建立在一个够不着的检查上。它已经找出 3 个真实的平台缺陷。</p>
+</div>
+
+<p>
+  在界面上它被单独分组，标注为<em>「对照（不是 harness，不要引用它的曲线）」</em> ——
+  一个会被误当成方法结果的对照，比没有对照更糟。
+</p>
+
+<h2 id="methods">方法的接口</h2>
+
+<p>两种执行模式，区别只在<strong>谁拥有调度</strong>：</p>
+
+<div class="grid g2">
+  <div class="card">
+    <h4>Mode A · 平台驱动</h4>
+    <p class="sub" style="margin-bottom:0">平台拥有循环，每轮调用方法一次、要一步。
+    可比性最高。</p>
+  </div>
+  <div class="card">
+    <h4>Mode B · 方法驱动</h4>
+    <p class="sub" style="margin-bottom:0">方法在自己的进程里跑自己的搜索，写出整条轨迹；
+    平台解析并测量它指名的状态。为那些<em>已经存在、不能为了被测而改接线</em>的方法准备 ——
+    RRSI 拥有一个退火的 20 轮预算，DGM 有一个 archive。</p>
+  </div>
+</div>
+
+<p>两种模式写<strong>同一种</strong> <code>curve.jsonl</code>，所以来自任何一种的曲线都落在同一根轴上。</p>
+
+<p>方法还可以拒绝一个候选（<code>stop</code>）—— 拒绝一个候选和「已经做完」不是同一件事。
+以及 <code>nominated</code>：方法为哪一步背书。平台记录这些，但<strong>不解释</strong>它们。</p>
+
+<h2 id="adapters">九个适配器的发现</h2>
+
+<div class="note warn">
+  <p style="margin-bottom:0"><b>这一节记录的是一条历史结论，不是当前能力。</b>它描述的 replay 路线已不再维护
+  （见 <code>adapters/README.md</code>）。活下来的是那个<em>读数</em>：下面这张边界表是平台记录
+  <code>editable_surface_touched</code> 而不接受一个声明模式的原因，也是为什么一次移植必须说明
+  「它的哪条规则是 Mode A 表达不了的」。</p>
+</div>
+
+<p>九个已发表方法被适配过。每一个都从不同方向撞上同一堵墙：</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>产物是什么</th><th>方法</th><th>平台为什么跑不了它</th></tr></thead>
+  <tbody>
+    <tr><td>模块树 + 自己的 runner</td><td>RRSI</td><td>没有入口；它由 harbor 驱动</td></tr>
+    <tr><td>archive 里的变体</td><td>DGM</td><td>由方法自己的容器脚手架调用</td></tr>
+    <tr><td>每轮复制自己的源码</td><td>SICA</td><td>在方法自己的 benchmark runner 下运行</td></tr>
+    <tr><td><code>gen_&lt;id&gt;/</code> + patch</td><td>HyperAgents</td><td>被拷进每运行一个的容器</td></tr>
+    <tr><td>一个 Python class</td><td>TTHE</td><td>需要 TTHE 自己的 <code>config.yaml</code></td></tr>
+    <tr><td>给引擎的声明</td><td>AHE</td><td>需要 <code>nexau</code></td></tr>
+    <tr><td>一个 artifact 文件</td><td>MAC</td><td>需要 artifact 的 key 和 endpoint</td></tr>
+    <tr><td>一个 YAML</td><td>HarnessX</td><td>需要 <code>harnessx</code> 包和模型配置</td></tr>
+    <tr><td><strong>只有输出</strong></td><td>Meta-Harness</td><td><strong>它的接口里包含沙箱协议</strong></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note">
+  <p><b>这个平台的交换单位是一个<em>能自己解一道题</em>的目录，而没有任何已发表方法的 harness 是这个形状。</b>
+  所以这份契约本可以放宽 —— 接受一个引擎、一份凭证、一个沙箱 —— 但它没有，理由只有一个：
+  一只 harness 能独立运行，是让两个方法可比的前提。<em>什么都能跑的平台，什么都测不出来。</em></p>
+  <p style="margin-bottom:0">这给适配器只留了两件事，没有第三件：<strong>把产物变成自足的，或者诚实地报告它不是。</strong>
+  两种结果都记在曲线点上（<code>measured_by_platform</code> 加上理由），所以读的人总能分辨自己看的是哪一种。</p>
+</div>
+
+<h2 id="tb">Terminal-Bench 2 接入</h2>
+
+<p>这是最近完成的一次较大接入，也是把上面几条契约真正压到真实任务集上的一次。</p>
+
+<div class="grid g3">
+  <div class="kpi"><b>89</b><span>任务（本地上游 <code>2fd12b8</code>）</span></div>
+  <div class="kpi"><b>52 / 37</b><span>train / eval 划分（按哈希）</span></div>
+  <div class="kpi"><b>3</b><span>镜像在当前网络下拉不下来</span></div>
+</div>
+
+<p>接入过程中被真实任务集逼出来的设计决定：</p>
+
+<div class="layers">
+  <div class="layer"><b>布局容错</b><div><p>任务目录可能直接在根，也可能在 <code>tasks/</code> 下 —— 两种都认。
+  上游仓库结构变过一次，硬编码一种就会在某天静默地少发现一半任务。</p></div></div>
+  <div class="layer"><b>没有 compose 文件</b><div><p>代码里一个 <code>custom_docker_compose</code> 标志曾经指向一个
+  <strong>在任何地方都不存在</strong>的 compose 文件。整个 89 任务集里没有任何 compose —— 那个标志是空的。</p></div></div>
+  <div class="layer"><b>验证容器必须能联网</b><div><p>89/89 个 <code>test.sh</code> 都会安装依赖。
+  验证容器原本用默认的 <code>network="none"</code> 创建，那会让<strong>所有 89 道题静默得零分</strong>。
+  现在按任务声明的网络来建。</p></div></div>
+  <div class="layer"><b><code>docker cp</code> 的目录语义</b><div><p><code>docker cp &lt;dir&gt;/.</code> 里的点
+  被 pathlib 吃掉了，内容落到了 <code>/app/setup</code> 而不是 <code>/app</code>。加 <code>contents=True</code>。</p></div></div>
+  <div class="layer"><b>顺序</b><div><p><code>mkdir_in</code> 必须在 <code>start</code> 之后；<code>/tests</code>
+  在真实镜像里不存在，是平台负责拷进去。</p></div></div>
+  <div class="layer"><b>能力门禁排在镜像解析之前</b><div><p>顺序曾经是反的，于是一只<em>结构上不可能工作</em>的 harness
+  会被指示去导入镜像；用户导完一个，回来被指示导入下一个。实测：两次 UI 运行、两个不同的缺失镜像，
+  而真正的原因（这只 harness 只声明了 <code>files</code>）从未出现。</p></div></div>
+</div>
+
+<h2 id="tests">测试分层</h2>
+
+<p>
+  316 例，24 个文件，全绿（314 通过 / 2 跳过）。它们的存在方式反映这个项目的信条：
+  <strong>一条规则要么有测试钉住它，要么它只是注释</strong>。
+</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>层</th><th>文件</th><th>钉住的东西</th></tr></thead>
+  <tbody>
+    <tr>
+      <td rowspan="4">边界</td>
+      <td><code>test_boundaries.py</code> (13)</td>
+      <td>方法读不到评分器；平台文件不许被 import 成依赖</td>
+    </tr>
+    <tr><td><code>test_isolation.py</code> (14)</td><td>harness 够不到平台</td></tr>
+    <tr><td><code>test_sandbox.py</code> (13)</td><td>bwrap 命名空间真的成立，且不许降级</td></tr>
+    <tr><td><code>test_split.py</code> (9)</td><td>一次运行只关于一侧；<strong>运行之外的题不能拒掉这次运行</strong></td></tr>
+    <tr>
+      <td rowspan="4">环境</td>
+      <td><code>test_container.py</code> (23)</td>
+      <td>容器原语、摘要固定、网络声明</td>
+    </tr>
+    <tr><td><code>test_container_state.py</code> (17)</td><td>commit → 新鲜容器验证的十步，含 oracle 可达性</td></tr>
+    <tr><td><code>test_services.py</code> (34)</td><td>服务生命周期与每任务网络</td></tr>
+    <tr><td><code>test_verifier.py</code> (12)</td><td>曲线点只带验证器<em>种类</em>，绝不带参数</td></tr>
+    <tr>
+      <td rowspan="3">记录</td>
+      <td><code>test_console.py</code> (13)</td><td>两种读者看到同一件事；事件流字段齐全</td></tr>
+    <tr><td><code>test_states.py</code> (6)</td><td>每轮状态落盘，含 round 0</td></tr>
+    <tr><td><code>test_stop_semantics.py</code> (4)</td><td>拒绝候选 ≠ 已经做完</td></tr>
+    <tr>
+      <td rowspan="3">方法</td>
+      <td><code>test_editor.py</code> (33)</td><td>共用编辑器的每一条规则</td></tr>
+    <tr><td><code>test_rrsi.py</code> (13)</td><td>RRSI 的移植</td></tr>
+    <tr><td><code>test_adapters.py</code> (10)</td><td>适配器的两件事：自足，或如实说不</td></tr>
+    <tr>
+      <td rowspan="2">界面</td>
+      <td><code>test_ui.py</code> (12)</td><td>静态不变量：类名复用碰撞、全局元素选择器、视图渲染函数必须存在、<code>var(--x)</code> 必须有定义</td>
+    </tr>
+    <tr><td><code>test_error_paths.py</code> (14)</td><td>每一条拒绝路径都真的会拒绝</td></tr>
+    <tr>
+      <td rowspan="7">移植与安装</td>
+      <td><code>test_ahe.py</code> (18)</td><td>AHE 的移植</td>
+    </tr>
+    <tr><td><code>test_harnessx.py</code> (17)</td><td>HarnessX 的移植</td></tr>
+    <tr><td><code>test_parent_selection.py</code> (16)</td><td>父代选择规则</td></tr>
+    <tr><td><code>test_tthe.py</code> (8)</td><td>TTHE 的移植</td></tr>
+    <tr><td><code>test_install_sh.py</code> (8)</td><td>安装脚本真的验证沙箱可用，而不是只检查 bwrap 存在</td></tr>
+    <tr><td><code>test_cli_harness.py</code> (6)</td><td>非 Python 的 harness 也是一等公民</td></tr>
+    <tr><td><code>test_harness_contract.py</code> (3)</td><td>清单与入口契约</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p class="sub">上表覆盖全部 316 例（240 + 76）。按「钉住哪条规则」而不是按目录分组 ——
+一个测试文件的价值是它防止了哪一种退化，不是它测了哪个模块。</p>
+
+<div class="note">
+  <p style="margin-bottom:0"><b>为什么界面也要有测试。</b>控制台把 HTML / CSS / JS 放在一个文件里，
+  没有构建步骤 —— 代价是没有任何东西替你检查这三者还对得上。已经真实发生过的：
+  <code>view('graph')</code> 调用一个从未写过的 <code>loadGraph()</code>，
+  于是「版本图」点开是空白，而服务端测试全绿。静态检查抓不到「调用了不存在的函数」，
+  但抓得到「HTML 里的容器 id 没有任何 JS 引用它」。</p>
+</div>
+
+<h2 id="defects">构建中修掉的真缺陷</h2>
+
+<p>这一节是这台仪器的费用清单。它们大多不是「写错了」，而是<strong>两个都对的东西接在一起就不对</strong>：</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>症状</th><th>真实原因</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>只选了一题，却被另一题的镜像拒掉</td>
+      <td>收窄只做了任务清单，三个 per-task 表仍是整个数据集的</td>
+    </tr>
+    <tr>
+      <td>run 目录里混着上一次运行的轮次</td>
+      <td>覆盖时只截断了 <code>console.log</code>，<code>round*_base/</code>、<code>round*_ws/</code> 都留着 —— 新的一次轮数更少时，残留成了这次记录的一部分</td>
+    </tr>
+    <tr>
+      <td>eval 的轨迹被丢掉</td>
+      <td><code>_save_traces</code> 只写 train 侧，25 条 eval 轨迹被丢弃</td>
+    </tr>
+    <tr>
+      <td>导入镜像 67 次全部瞬间失败</td>
+      <td><code>import_env.py</code> 里少了 <code>import os</code>；而且异常被 <code>except Exception</code> 吞掉</td>
+    </tr>
+    <tr>
+      <td>点历史记录只切视图、什么都不显示</td>
+      <td><code>view('exp', document.querySelector('.tabs button'))</code> —— <code>.tabs</code> 在整份文件里不存在，拿到 null 后抛异常，把同一个 onclick 里后面的 <code>showRun()</code> 一起吃掉了</td>
+    </tr>
+    <tr>
+      <td>表单上两个面板标题高度不齐</td>
+      <td>侧栏 logo 的规则写成裸 <code>.brand{…min-height:60px}</code>，于是 <code>&lt;span class="pill brand"&gt;</code> 也被套上 —— 一个 11.5px 的徽标被撑成 60px 高</td>
+    </tr>
+    <tr>
+      <td>图例里 12×12 的圆点变成 93×93</td>
+      <td>一条全局 <code>svg{width:100%;height:auto}</code> 命中了页面上每一个 svg</td>
+    </tr>
+    <tr>
+      <td>曲线图有刻度数字却没有网格线</td>
+      <td><code>stroke="var(--grid)"</code>，而 <code>--grid</code> 从未定义。自定义属性没定义时<code>var()</code> 会让<strong>整条声明</strong>失效</td>
+    </tr>
+    <tr>
+      <td>曲线点声称被一个从未运行过的验证器评过分</td>
+      <td><code>verifier_kinds</code> 记的是整个数据集的种类，而不是这次运行用的</td>
+    </tr>
+    <tr>
+      <td>一次 train 运行宣布「eval side is 1 tasks」</td>
+      <td>那句话数的是<em>这次运行自己</em>的题数，而考试侧有 37 题 —— 测量对象错了</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note">
+  <p style="margin-bottom:0"><b>共同的形状。</b>这些缺陷里没有一个会产生异常，也没有一个会被「服务端测试全绿」
+  挡住 —— 它们都是<em>静默地量错了东西</em>。所以这个项目的测试重点不在覆盖率，而在
+  「这条规则有没有一件具体的事钉住它」。</p>
+</div>
+
+<h2 id="notdesigned">尚未设计的东西</h2>
+
+<p>写下没做的事，和写下做了的事一样是这份文档的一部分。</p>
+
+<ul>
+  <li><strong>多容器环境</strong>（§2.5.10）—— 一个任务需要几个互相编排的容器时怎么办，还没有设计。</li>
+  <li><strong>replay 路线</strong> —— 已经不再维护。它留下的读数还在，能力不在了。</li>
+  <li><strong>「数据集声明一个镜像」与「harness 声明依赖」之间的调和</strong> ——
+  镜像是为某只 harness 构建的（<code>loop</code> 需要 <code>openai</code>，裸 <code>python</code> 镜像里没有），
+  这个耦合被记在数据集里而不是藏起来，但平台还没有机制去调和它。这是一个<em>已知的开放设计点</em>，
+  不是被这个 demo 解决的问题。</li>
+  <li><strong>3 个拉不下来的 Terminal-Bench 镜像</strong> —— 外部网络限制。
+  界面把它们明确标成不可跑并写明原因，<strong>不会让你选中了才被拒</strong>。</li>
+</ul>
+
+<h2>依赖</h2>
+
+<div class="tags">
+  <span class="pill accent">bubblewrap</span>
+  <span class="pill accent">git</span>
+  <span class="pill accent">python3 ≥ 3.10</span>
+  <span class="pill ok">平台本身零第三方 Python 包</span>
+</div>
+
+<p>
+  全部依赖就这三样。平台用的每一样东西都在标准库里。<code>openai</code> 只被参考 harness
+  的模型调用惰性导入，所以一只用别的语言、或对着别的提供方写的 harness 永远不需要它。
+</p>
+
+<p>
+  <code>install.sh</code> 不会停在「bwrap 装上了」，因为那不等于沙箱能工作：
+  一个禁用了非特权用户命名空间的内核，或一条限制它们的 AppArmor 策略（较新 Ubuntu 的默认），
+  会让 <code>bwrap</code> 存在却在运行时失败。所以它最后会要求平台真的建一个命名空间、
+  并在里面找自己。失败就说清原因、拒绝称这台机器已就绪 ——
+  而不是让一次运行降级到 <code>--no-sandbox</code> 去产生含义与自称不符的数字。
+</p>
+
+<div class="footer">
+  <p style="margin-bottom:6px">HarnessGrad · 平台构建说明。本文档描述的是契约 <code>INTERFACE.md</code> v0.1（FROZEN）
+  与当前实现（<code>driver.py</code> 2067 行 / <code>eval/</code> 9 模块 / 316 例测试）。</p>
+  <p style="margin-bottom:0">文档本身在 <code>docs/</code> 下，而 <code>docs/</code> 在完整性校验的名单里 ——
+  所以它是一份<em>会被哈希的</em>说明：运行期间改它，会让那次运行失败并指名这个文件。</p>
+</div>
+
+</main>
+</div>
+
+<script>
+// 滚动时点亮左侧目录。
+//
+// 两个刻意的选择：
+//   * **不用 IntersectionObserver。** 它只在相交状态发生变化时回调，于是一次不改变
+//     任何标题相交状态的滚动不会触发重算，高亮就停在上一节。rAF 节流的 scroll 监听
+//     每次滚动都重算。
+//   * **不缓存标题位置。** 缓存过要在字体加载、图片、窗口变化时全部失效 —— 那是一种
+//     会悄悄开始指错地方的 bug。二十个标题每帧各读一次布局，代价可以忽略。
+(function(){
+  var links = [].slice.call(document.querySelectorAll('#toc a'));
+  var map = {};
+  links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+  var heads = [].slice.call(document.querySelectorAll('main h2[id]'));
+  if(!heads.length) return;
+
+  var OFFSET = 132, current = null;
+  function setOn(id){
+    if(id === current) return;
+    if(current && map[current]) map[current].classList.remove('on');
+    current = id;
+    if(map[id]) map[id].classList.add('on');
+  }
+  function update(){
+    var best = heads[0].id;
+    for(var i = 0; i < heads.length; i++){
+      if(heads[i].getBoundingClientRect().top <= OFFSET) best = heads[i].id;
+      else break;
+    }
+    // 最后一节可能短到滚不到顶：到底了就直接点亮它，否则它永远点不亮。
+    if(window.innerHeight + window.scrollY >= document.body.scrollHeight - 2){
+      best = heads[heads.length - 1].id;
+    }
+    setOn(best);
+  }
+  var pending = false;
+  function onScroll(){
+    if(pending) return;
+    pending = true;
+    requestAnimationFrame(function(){ pending = false; update(); });
+  }
+  update();
+  window.addEventListener('scroll', onScroll, {passive:true});
+  window.addEventListener('resize', onScroll);
+})();
+</script>
+</body>
+</html>

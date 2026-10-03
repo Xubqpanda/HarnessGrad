@@ -1,0 +1,5 @@
+{
+  "kind": "published",
+  "title": "RRSI:噪声带内的逐轮决策(移植)",
+  "note": "移植的是 RRSI 的逐轮决策规则:噪声带下界 S' >= S* - delta、按增益分两支的成本规则(w_s dS - w_c dC + w_n nu,novelty 只在带内平票)、退火编辑预算 b_t、停滞后为未试组件保留探索槽、以及评估前的泄漏 critic;mode A 只有一个候选且无条件接受,所以 argmax 与「不可接受就停在 H_t」无法表达,记录里只做重裁决,不用来否决。"
+}

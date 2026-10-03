@@ -216,3 +216,57 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# Method sources and run artifacts
+# ---------------------------------------------------------------------------
+# The methods HarnessGrad adapts are OTHER PEOPLE'S repositories. They are not
+# vendored: adapters/SOURCES.md records what was read and adapters/fetch.sh
+# retrieves it. They live as a sibling directory of this repo, so a clone of
+# this repo contains code and records -- not datasets, papers or their licenses.
+*_runs/
+
+# Run artifacts: every run contains a workspace that is itself a git repo, so
+# committing runs/ would nest repositories and grow without bound.
+runs/
+
+# Runs archived rather than deleted, when a batch was declared meaningless. Same
+# reason as runs/, and named separately so an archive is never mistaken for a live
+# result a reader could compare against.
+runs_discarded_*/
+
+# Non-code assets that arrive attached to method repositories. Kept out so a
+# clone of this repo contains code and records, not datasets and papers.
+# NOTE: lock files are deliberately NOT ignored -- they belong in the repo,
+# they are what makes an environment reproducible.
+*.pdf
+**/docs/assets/
+**/predictions/
+**/logs/
+
+# ---------------------------------------------------------------------------
+# Credentials
+# ---------------------------------------------------------------------------
+# `.env` holds real keys for the model behind the harness. It is written by hand
+# and never committed; `.env.example` is the committed template that says which
+# variables a run needs. This rule is added before the file exists, because a
+# secret that has been committed once is compromised even after it is deleted.
+.env
+.env.local
+.env.*.local
+# `.env.example` is deliberately NOT ignored: it is the committed template that
+# says which variables a run needs. A bare `.env.*` pattern would swallow it, and
+# the negation below would not rescue it -- git does not re-include a file whose
+# own pattern matched. Enumerating the concrete names is the reliable form.
+
+# Exported harnesses: the finished artifacts of runs, browsable rather than buried
+# in a run's git. They are copies -- the commits they came from stay in runs/ --
+# so regenerating them is `python tools/export_harnesses.py`.
+current_harness/
+
+# Harness working trees. Outside the platform tree on purpose: a harness placed
+# inside it can reach the driver and .env through `..`.
+harnessgrad_work/
+
+# 服务 PID 文件:本地运行状态,不该进版本库
+.harnessgrad-state/

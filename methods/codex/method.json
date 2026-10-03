@@ -1,0 +1,7 @@
+{
+  "kind": "published",
+  "title": "codex:外部编码 agent 当改进器",
+  "note": "把改进器从方法里拆出来:改进由 codex(平台解析并记名,见 improvers/)完成,这个方法只负责适配——把平台频道里的证据摆给它看、把 harness 复制成一份可编辑的候选、跑一次会话、把改动的文件报回去。规则层面的决策(接受条件、预算、critic)不在这里,那是别的 method 该叠加的东西。",
+  "improver": "codex",
+  "improver_note": "改进器是 codex(由 tools/improver.py 解析并记名)。方法自己不带模型调用:它只负责把证据摆好、给 codex 一份可编辑的 harness、把改动报回来,规则层面的决策留给别的 method 叠加。"
+}

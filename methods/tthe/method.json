@@ -1,0 +1,5 @@
+{
+  "kind": "published",
+  "title": "TTHE:固定分支角色与回滚闸门(移植)",
+  "note": "移植的是 TTHE 每轮的决策规则:按 DIVERSITY[round_index % 3] 固定分支角色,子代必须通过有效性闸门并留下 proposal card,任何失败一律回退到现任——现任永远是可接受的结果,所以按构造不会退步。没有移植它的 G×R 同批候选池与 agentic judge、transductive 评分协议,以及反译/蜕变一致性这两个需要答案键的 label-free 代理:mode A 每轮只暴露一个候选,方法也不允许给自己打分。"
+}

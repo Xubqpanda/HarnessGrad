@@ -1,0 +1,5 @@
+{
+  "kind": "published",
+  "title": "AHE:预注册预测与组件级回退",
+  "note": "移植的是 AHE 的每轮决策规则:动手之前先写 change_manifest,声明 predicted_fixes 和 risk_tasks;下一轮用 per-task 的 fail→pass / pass→fail 把每条改动判成 HARMFUL / MIXED / EFFECTIVE / PARTIALLY_EFFECTIVE / INEFFECTIVE,判决再渲染成「保留 / 改进 / 回滚并换一层重来」。回滚不是验收门槛 —— AHE 本来就没有验收门槛,它是模型自己把文件拷回去,所以这里在 HARMFUL 时把候选建在上一轮之前的状态上。它的 k 次 rollout 全过聚合、全工具编辑器和 Best-of-N 都无法在 mode A 表达;constraint_level 在 AHE 里没有任何 Python 读它,这里也只当声明记录。"
+}
