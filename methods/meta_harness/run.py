@@ -320,8 +320,9 @@ def build_prompt(edit_base: Path, channel_base: Path, req: dict, frontier: dict,
         f"hypothesis: {row['hypothesis'][:160] or '(none)'} · "
         f"changes: {', '.join(row['changes']) or '(none)'}"
         for row in frontier["rows"])
-    skill_path = editor.channel(channel_base) / "SKILL.md"
-    skill = skill_path.read_text(encoding="utf-8") if skill_path.is_file() else ""
+    # No skill block here: `editor.ask` injects the platform's skill by default
+    # (`editor.skill_block`), and pasting it in twice would make the prompt and the point's
+    # `skill_sha` disagree.
     return (
         f"Round {req.get('round_index', 1)}. The harness scored "
         f"{latest.get('score')} on the studied task set; "
@@ -332,7 +333,6 @@ def build_prompt(edit_base: Path, channel_base: Path, req: dict, frontier: dict,
         f"## Every prior candidate, as the evolution summary records it\n{rows or '(none)'}\n\n"
         f"## Why this round edits what it edits\n{base_why}\n\n"
         f"## What the harness did last round\n{traces}\n\n"
-        + (f"## How to improve a harness (the platform's skill)\n{skill}\n\n" if skill else "")
         + "## Current harness sources\n"
         + "\n\n".join(f"### {k}\n```\n{v}\n```" for k, v in sources.items())
         + "\n\nPropose one edit that raises the tasks the frontier shows are failing, "

@@ -61,7 +61,7 @@ def _invoke(mod, request: dict, monkeypatch, reply=None, raises=None) -> dict:
 
     captured: dict = {}
 
-    def fake_ask(prompt, system=editor.DEFAULT_SYSTEM, base=None):
+    def fake_ask(prompt, system=editor.DEFAULT_SYSTEM, base=None, skill=True):
         captured["prompt"] = prompt
         captured["system"] = system
         if raises is not None:
@@ -470,13 +470,124 @@ def test_the_prompt_carries_why_each_task_failed(tmp_path):
     assert "Connection error" in prompt
 
 
-def test_the_prompt_carries_the_platform_skill_when_it_is_staged(tmp_path):
-    """默认 skill 由平台放进通道 —— 方法要读它,否则"怎么改 harness"要靠自己发明。"""
-    mod = _load("llm_improver")
+def _capture_messages(monkeypatch, reply='{"no_change": "stub"}'):
+    """装一个假的 openai client,把**真正发出去的 messages** 抓下来。"""
+    sent: list[list[dict]] = []
+
+    class _Msg:
+        content = reply
+
+    class _Choice:
+        message = _Msg()
+
+    class _Resp:
+        choices = [_Choice()]
+        model = "stub"
+        usage = None
+
+    class _Completions:
+        def create(self, **kw):
+            sent.append(kw.get("messages") or [])
+            return _Resp()
+
+    class _Client:
+        def __init__(self, **kw):
+            self.chat = type("C", (), {"completions": _Completions()})()
+
+    import openai
+    monkeypatch.setattr(openai, "OpenAI", _Client)
+    return sent
+
+
+#: The header `editor.skill_block` puts in front of whatever the skill says. Counted rather
+#: than the phrase "How to improve a harness", because a skill's own first line is often
+#: exactly that phrase and then a correct injection looks like a double injection.
+SKILL_HEADER = "## How to improve a harness (the platform's skill)"
+
+
+def _staged_skill(tmp_path) -> Path:
     root = _write_harness(tmp_path / "base")
-    (root / "_harnessgrad" / "SKILL.md").write_text("# How to improve a harness\nXYZ\n")
-    prompt = mod.build_prompt(root, {"round_index": 2, "incumbent_score": 0.0})
-    assert "How to improve a harness" in prompt and "XYZ" in prompt
+    (root / "_harnessgrad" / "SKILL.md").write_text("# XYZ skill\nBODY-MARKER\n")
+    return root
+
+
+def test_the_editor_injects_the_platform_skill_by_default(tmp_path, monkeypatch):
+    """**默认继承,而不是每个方法自己记得读。**
+
+    skill 由平台放进通道(`harnessgrad/channel.py`),而曲线点上的 `identity.skill_sha`
+    说的是"这次给了方法哪份说明书"。在这条路修好之前,12 个方法里只有 4 个真的把它读进
+    prompt —— 于是那个字段在另外 8 个方法上是在替一份**没有被用到的** skill 打包票。
+    现在注入发生在 `editor.ask` 里,一次,所有方法都继承。
+    """
+    import editor
+
+    root = _staged_skill(tmp_path)
+    monkeypatch.setenv("HG_METHOD_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("HG_METHOD_API_KEY", "x")
+    monkeypatch.setenv("HG_METHOD_MODEL", "m")
+    sent = _capture_messages(monkeypatch)
+
+    editor.ask("do the thing", base=root)
+    blob = "\n".join(m["content"] for m in sent[-1])
+    assert SKILL_HEADER in blob and "BODY-MARKER" in blob
+    assert "do the thing" in blob
+
+
+def test_the_skill_is_injected_once_even_though_methods_compose_prompts(tmp_path,
+                                                                       monkeypatch):
+    """方法自己**不该**再贴一份:两份会让 prompt 和点上的 `skill_sha` 互相打脸。"""
+    import editor
+
+    mod = _load("llm_improver")
+    root = _staged_skill(tmp_path)
+    own_prompt = mod.build_prompt(root, {"round_index": 2, "incumbent_score": 0.0})
+    assert SKILL_HEADER not in own_prompt, "方法又把 skill 贴回来了"
+    assert "BODY-MARKER" not in own_prompt, "方法又把 skill 正文贴回来了"
+
+    monkeypatch.setenv("HG_METHOD_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("HG_METHOD_API_KEY", "x")
+    monkeypatch.setenv("HG_METHOD_MODEL", "m")
+    sent = _capture_messages(monkeypatch)
+    editor.ask(own_prompt, base=root)
+    blob = "\n".join(m["content"] for m in sent[-1])
+    assert blob.count(SKILL_HEADER) == 1, blob.count(SKILL_HEADER)
+    assert blob.count("BODY-MARKER") == 1, blob.count("BODY-MARKER")
+
+
+def test_a_method_can_decline_the_skill_explicitly(tmp_path, monkeypatch):
+    """不读要**显式声明** —— 这是这次改动的另一半:默认继承,退出是一个写出来的参数。"""
+    import editor
+
+    root = _staged_skill(tmp_path)
+    monkeypatch.setenv("HG_METHOD_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("HG_METHOD_API_KEY", "x")
+    monkeypatch.setenv("HG_METHOD_MODEL", "m")
+    sent = _capture_messages(monkeypatch)
+
+    editor.ask("do the thing", base=root, skill=False)
+    blob = "\n".join(m["content"] for m in sent[-1])
+    assert SKILL_HEADER not in blob and "BODY-MARKER" not in blob
+    assert "do the thing" in blob
+
+
+def test_no_staged_skill_means_no_block(tmp_path):
+    """没有 skill 就不注入空壳 —— 和点上省略 `skill_sha` 是同一条规则。"""
+    import editor
+
+    root = _write_harness(tmp_path / "bare")
+    assert editor.skill_block(root) == ""
+    assert editor.skill_block(None) == ""
+
+
+def test_a_long_skill_is_truncated_loudly(tmp_path):
+    """截断不能是静默的:实测那份 skill 8407 字符而当时上限 6000,而这一轮最需要的
+    那一节正好在 5595 —— 悄悄丢掉自己的说明书,比没有说明书更糟。"""
+    import editor
+
+    root = _write_harness(tmp_path / "long")
+    (root / "_harnessgrad" / "SKILL.md").write_text("A" * (editor.SKILL_LIMIT + 500))
+    block = editor.skill_block(root)
+    assert "[truncated:" in block and str(editor.SKILL_LIMIT) in block
 
 
 def test_a_prompt_without_pages_still_builds(tmp_path):

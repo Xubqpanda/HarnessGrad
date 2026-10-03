@@ -154,7 +154,7 @@ def main() -> int:
     ap.add_argument("--method-timeout", type=int, default=86400,
                     help="mode B: seconds before the method's own loop is killed")
     # **哪个改进器。** 方法自带改进器时这三个开关是无害的;用一种"把方法拆成规则+
-    # 改进器"的方法(如 `methods/codex`)时,它们决定谁来做那一步 —— 而解析出来的
+    # 改进器"的方法时,它们决定谁来做那一步 —— 而解析出来的
     # 版本和哈希会进每个曲线点(INTERFACE.md §4.49)。放在命令行而不是只读配置:
     # 一次实验"用哪个改进器"正是最该被显式记录、最不该靠环境变量碰运气的东西。
     ap.add_argument("--improver", default=None,
@@ -322,7 +322,7 @@ def main() -> int:
     # claim" could not be answered without running the program that produced it.
     improver: dict = {}
     # The request travels through the environment, because that is how the improver
-    # itself is configured (`HG_IMPROVER*` are what `methods/codex` reads) -- resolving
+    # itself is configured (`HG_IMPROVER*` are what the CLI improver reads) -- resolving
     # and executing must not disagree about which one was chosen.
     if args.improver:
         os.environ["HG_IMPROVER_NAME"] = args.improver

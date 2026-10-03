@@ -25,6 +25,17 @@ client** (no `OpenAI(...)`, no `chat.completions`); all 7 call the shared
 `tools/improver.py` and named on the curve point. So a run of "RRSI" here means *RRSI's
 decision rule, with this platform's loop and whichever improver the run resolved*.
 
+**The platform's skill is inherited, not re-read.** `improvers/skill.md` is staged as
+`_harnessgrad/SKILL.md` for every method, and `editor.ask` now prepends it to the prompt by
+default (`editor.skill_block`), so a point's `identity.skill_sha` means "the skill this
+prompt carried" rather than "the skill this run offered". Before 2026-10-04 only 4 of 12
+methods read it, each with its own copy of the path, the header and the truncation -- which
+made the field a claim about a prompt that most methods never sent. A method that wants a
+different skill, or none, says so once at its call site (`editor.ask(..., skill=False)`).
+The CLI improver receives the same skill as a **file** (`methods/cli_improver.py` stages it
+as `evidence/SKILL.md`), because a subprocess reads files rather than prompts: one staged
+skill, two ways of handing it over.
+
 ---
 
 ## 2. What is in `methods/`, and what is deliberately not
@@ -39,7 +50,7 @@ decision rule, with this platform's loop and whichever improver the run resolved
 | HarnessX | arXiv 2606.14249 (`darwin-agent/HarnessX`) | the acceptance gate (historical best, tolerance, passed-count noise guard, cost penalty) and the pre-registration |
 | TTHE | arXiv 2607.08124 (`junnie00/TTHE`) | fixed branch-role schedule, validity gate, proposal card, "the incumbent is always acceptable" |
 | Meta-Harness | arXiv 2603.28052 (`stanford-iris-lab/meta-harness`) | the frontier rule: a **per-task** best map plus an overall best, the base choice that implies, and the evolution-summary row (declared hypothesis beside its measured delta) |
-| codex | -- | not a paper method: the improver moved *out* of the method (an external coding agent), so that a rule and a tool can vary independently |
+| ~~codex~~ | -- | **removed 2026-10-04.** It was never a paper method; it was the improver layer wearing a method's name. Driving the resolved CLI improver now lives in `methods/cli_improver.py` as a library (no method calls it yet: see the open decision in `INTERFACE.md` §4.49), so a rule and a tool can still vary independently -- and `方法 = codex` is no longer a true sentence about a run. The `codex` **improver** stays in `improvers/improvers.json`: it is the tool, not the rule |
 | `llm_improver`, `echo_base`, `noop` | this platform | the shared diagnose-and-edit loop; a contract self-test; the floor every curve must beat |
 
 One adapted method has **no port at all**, and one has no port *yet*:

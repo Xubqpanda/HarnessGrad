@@ -428,7 +428,7 @@ def test_an_unreadable_reply_is_repaired_in_phase_two_not_by_the_parser(tmp_path
     prompts: list[str] = []
     calls = {"n": 0}
 
-    def fake_ask(prompt, system=None, base=None):
+    def fake_ask(prompt, system=None, base=None, skill=True):
         prompts.append(prompt)
         calls["n"] += 1
         if calls["n"] == 1:

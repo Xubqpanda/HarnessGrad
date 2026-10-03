@@ -427,8 +427,8 @@ def _keep_method_logs(method_ws: Path, run_dir: Path | None, round_no: int) -> N
 
     The method workspace is temporary by design -- a temp directory, deleted when the
     round ends -- and that is right for the *candidate harness*, which the platform has
-    already copied out, and wrong for the method's own diagnostics. Measured with
-    `methods/codex`: the improver's entire transcript (up to 200 kB: what it read, what
+    already copied out, and wrong for the method's own diagnostics. Measured with the
+    CLI improver: its entire transcript (up to 200 kB: what it read, what
     it tried, why it changed nothing) went to `<workspace>/improver.log`, and every run
     that had to answer "why did the improver change nothing?" had thrown that file away
     with the scratch directory. The question is normally asked after the run.

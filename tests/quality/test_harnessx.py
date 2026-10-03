@@ -114,7 +114,7 @@ def _invoke(mod, request, monkeypatch, reply=None, raises=None) -> dict:
 
     captured: dict = {}
 
-    def fake_ask(prompt, system=editor.DEFAULT_SYSTEM, base=None):
+    def fake_ask(prompt, system=editor.DEFAULT_SYSTEM, base=None, skill=True):
         captured["prompt"] = prompt
         captured["ask_calls"] = captured.get("ask_calls", 0) + 1
         if raises is not None:

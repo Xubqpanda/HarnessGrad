@@ -72,7 +72,7 @@ def _method_sandbox_plan(work: Path, argv: list[str], scratch: Path,
 
     `runtime` is the second thing it cannot be given less of, and it was missing for
     exactly as long as the improver layer has existed. A method whose contribution is an
-    external tool -- `methods/codex` runs codex, resolved by the platform -- needs that
+    external tool -- `methods/cli_improver` runs whatever the platform resolved -- needs that
     tool's trees on its disk. Measured with `--improver codex`: round 1 died three times
     with `exit 1`, once because the method's own resolver lives under the hidden
     platform, and again with `FileNotFoundError: …/codex.js` because the namespace binds

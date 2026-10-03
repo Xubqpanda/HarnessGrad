@@ -74,6 +74,13 @@ PROTECTED = {"harness.json"}
 #: (`load_sources`), because the failure mode of a silent cap is a plausible-looking
 #: candidate that cannot run.
 SOURCE_LIMIT = int(os.environ.get("HG_METHOD_SOURCE_LIMIT", "24000"))
+#: How much of the platform's skill reaches a prompt. A skill is prose read by a model with
+#: a large context, so the limit bounds a runaway file rather than curating one. Raised from
+#: 6000 the moment the platform's own skill outgrew it: it was 8407 characters, and the
+#: section a round needed most -- the one written from the *previous* run's failure -- sat
+#: at character 5595. Truncation is never silent; a prompt that quietly drops its own
+#: guidance is worse than no guidance, because the round is spent and nothing says why.
+SKILL_LIMIT = int(os.environ.get("HG_METHOD_SKILL_LIMIT", "24000"))
 
 
 # --------------------------------------------------------------- the channel ---
@@ -660,13 +667,47 @@ def _record_usage(usage, model: str | None) -> None:
     _SPENT["output"] += int(getattr(usage, "completion_tokens", 0) or 0)
 
 
-def ask(prompt: str, system: str = DEFAULT_SYSTEM, base: Path | None = None) -> dict:
+def skill_block(base: Path | None) -> str:
+    """The platform's skill, as the prompt block every method inherits by default.
+
+    **Why this is here and not in each method.** The platform stages `improvers/skill.md`
+    as `_harnessgrad/SKILL.md` for every method (`harnessgrad/channel.py`), and
+    `identity.skill_sha` records it on every point -- but until this function existed only
+    four of twelve methods read it, each with its own copy of the path, the header and the
+    truncation. That is the same defect the record already had once: a point that names a
+    skill it cannot prove was in the prompt. With the block injected here, `skill_sha`
+    means "the skill this prompt carried", and a method that wants a different or no skill
+    says so once, explicitly, at its call site -- `ask(..., skill=False)`.
+
+    `None`/empty when nothing was staged: a run with no skill gets no block, and the point
+    omits `skill_sha` for the same reason (`harnessgrad/identity.py:_skill_sha`).
+    """
+    if base is None:
+        return ""
+    path = channel(base) / "SKILL.md"
+    if not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    if len(text) > SKILL_LIMIT:
+        text = (text[:SKILL_LIMIT]
+                + f"\n\n[truncated: the skill is {len(text)} chars long, "
+                  f"limit {SKILL_LIMIT}] ...\n")
+    return ("## How to improve a harness (the platform's skill)\n" + text)
+
+
+def ask(prompt: str, system: str = DEFAULT_SYSTEM, base: Path | None = None,
+        skill: bool = True) -> dict:
     """One model call, with a bounded retry when the reply cannot be read.
 
     `base` adds the run's configuration block ahead of the method's own prompt. It is
     passed explicitly rather than inferred, because the prompt a method builds is its
     own business and silently rewriting it would make every method's prompt
-    unreproducible from its source.
+    unreproducible from its source. The same `base` also supplies the platform's **skill**
+    (`skill_block`), injected by default because it is staged for every method and named on
+    every point; `skill=False` is how a method says it wants none.
 
     Retries because a small model's malformed JSON is intermittent, so a second
     sample usually parses -- but only a bounded number of times, and then it is
@@ -685,6 +726,10 @@ def ask(prompt: str, system: str = DEFAULT_SYSTEM, base: Path | None = None) -> 
         facts = run_facts(base)
         if facts:
             prompt = facts + "\n\n" + prompt
+        if skill:
+            block = skill_block(base)
+            if block:
+                prompt = block + "\n\n" + prompt
     last = ""
     for _ in range(attempts):
         resp = client.chat.completions.create(
@@ -767,7 +812,8 @@ EDIT_EXPECT = ("Return the complete corrected edit sequence as JSON, with the co
 
 
 def ask_for_json(prompt_for, *, system, base=None, attempts: int = 3,
-                 accept=None, what: str = "a JSON reply") -> tuple[dict, str]:
+                 accept=None, what: str = "a JSON reply",
+                 skill: bool = True) -> tuple[dict, str]:
     """Retry a JSON-producing model call with the failure fed back to the model.
 
     `accept(reply)` returns an empty string when the reply is usable, or the text that
@@ -779,7 +825,7 @@ def ask_for_json(prompt_for, *, system, base=None, attempts: int = 3,
     reply: dict = {}
     for _ in range(max(1, attempts)):
         try:
-            reply = ask(prompt_for(problems), system=system, base=base)
+            reply = ask(prompt_for(problems), system=system, base=base, skill=skill)
         except UnparseableReply as exc:
             problems = (f"your reply could not be read as {what}: {exc}. "
                         "Answer with the JSON envelope only, and nothing else.")
@@ -794,7 +840,7 @@ def ask_for_json(prompt_for, *, system, base=None, attempts: int = 3,
 
 
 def propose_and_apply(base: Path, req: dict, system: str, prompt_for, *,
-                      attempts: int = 3) -> tuple[dict, Path, str]:
+                      attempts: int = 3, skill: bool = True) -> tuple[dict, Path, str]:
     """Two phases: propose an edit sequence, then apply and validate it."""
     dest = candidate_path(req)
 
@@ -806,7 +852,7 @@ def propose_and_apply(base: Path, req: dict, system: str, prompt_for, *,
 
     reply, problems = ask_for_json(
         prompt_for, system=system, base=base, attempts=attempts,
-        accept=accept, what="an edit sequence")
+        accept=accept, what="an edit sequence", skill=skill)
     return reply, dest, problems
 
 

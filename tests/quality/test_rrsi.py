@@ -84,7 +84,7 @@ def _invoke(mod, request: dict, monkeypatch, respond):
 
     seen: list[dict] = []
 
-    def fake_ask(prompt, system=editor.DEFAULT_SYSTEM, base=None):
+    def fake_ask(prompt, system=editor.DEFAULT_SYSTEM, base=None, skill=True):
         seen.append({"prompt": prompt, "system": system})
         return respond(prompt, system)
 
@@ -216,7 +216,7 @@ def test_a_stalled_round_with_untried_components_reserves_an_exploration_slot(mo
 
     # 合规的那次会走到模型 critic,所以这里要打桩,否则测试依赖网络/凭据。
     import editor
-    monkeypatch.setattr(editor, "ask", lambda prompt, system=editor.DEFAULT_SYSTEM, base=None:
+    monkeypatch.setattr(editor, "ask", lambda prompt, system=editor.DEFAULT_SYSTEM, base=None, skill=True:
                         {"verdict": "accept", "reasons": [], "risk_notes": []})
 
     cfg = mod.RRSIConfig()
@@ -244,7 +244,7 @@ def test_the_critic_rejects_a_task_specialized_edit(monkeypatch):
 
     import editor
 
-    def fake_ask(prompt, system=editor.DEFAULT_SYSTEM, base=None):
+    def fake_ask(prompt, system=editor.DEFAULT_SYSTEM, base=None, skill=True):
         assert system == mod.CRITIC_SYSTEM
         return {"verdict": "reject",
                 "reasons": ["task-specialization: hard-codes task t03"]}
@@ -270,7 +270,7 @@ def test_an_unparseable_critic_reply_rejects_rather_than_accepts(monkeypatch):
     import editor
     prompts: list[str] = []
 
-    def fake_ask(prompt, system=editor.DEFAULT_SYSTEM, base=None):
+    def fake_ask(prompt, system=editor.DEFAULT_SYSTEM, base=None, skill=True):
         prompts.append(prompt)
         return {"no_change": "???"}
 
@@ -377,7 +377,7 @@ def test_main_records_the_rule_and_carries_components_between_rounds(tmp_path, m
                            "component": "prompt"}],
                 "hypothesis": "tighten the loop"}
 
-    def respond(prompt, system, base=None):
+    def respond(prompt, system, base=None, skill=True):
         if system == mod.CRITIC_SYSTEM:
             return {"verdict": "accept", "reasons": [], "risk_notes": []}
         return proposal
@@ -420,7 +420,7 @@ def test_an_over_budget_proposal_is_rejected_and_recorded(tmp_path, monkeypatch)
     # round_index=1 -> t=0 -> b_t=4,五个文件超预算。critic 不该被问到(确定性拒绝)。
     asked_critic = []
 
-    def respond(prompt, system, base=None):
+    def respond(prompt, system, base=None, skill=True):
         if system == mod.CRITIC_SYSTEM:
             asked_critic.append(True)
             return {"verdict": "accept"}
@@ -441,7 +441,7 @@ def test_a_provider_error_still_produces_a_trajectory(tmp_path, monkeypatch):
     traj = tmp_path / "traj.json"
     mod = _load()
 
-    def respond(prompt, system, base=None):
+    def respond(prompt, system, base=None, skill=True):
         raise RuntimeError("503 no available channel")
 
     got = _invoke(mod, _request(base, work, traj, round_index=1), monkeypatch, respond)

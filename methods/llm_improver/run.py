@@ -58,12 +58,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import editor                                                  # noqa: E402
 
 
-#: How much of `SKILL.md` reaches the prompt. A skill is prose read by a model with a
-#: large context; the limit exists to bound a runaway file, not to curate one. Raised from
-#: 6000 the moment the platform's own skill outgrew it -- see the note below.
-SKILL_LIMIT = 24000
-
-
 def failure_digest(base: Path) -> str:
     """Why each task failed, taken from the platform's per-task pages.
 
@@ -105,26 +99,15 @@ def build_prompt(base: Path, req: dict) -> str:
     incumbent = req.get("incumbent_score")
     traces = editor.load_traces(base, limit=6, order=editor.failing_first(base))
     failures = failure_digest(base)
-    skill_path = editor.channel(base) / "SKILL.md"
-    skill = ""
-    if skill_path.is_file():
-        text = skill_path.read_text(encoding="utf-8", errors="replace")
-        if len(text) > SKILL_LIMIT:
-            # Never silently. The platform's skill was 8407 characters when the cap was
-            # 6000, and the section a round needed most -- the one written from the
-            # *previous* run's failure -- sat at character 5595. A prompt that quietly
-            # drops its own guidance is worse than no guidance: the round is spent and
-            # nothing says why.
-            text = (text[:SKILL_LIMIT]
-                    + f"\n... [the rest of the skill is omitted: {len(text)} characters "
-                      f"long, limit {SKILL_LIMIT}] ...\n")
-        skill = text
+    # No skill block here: the platform's skill is staged for every method and injected by
+    # `editor.ask` on the way out (`editor.skill_block`), so pasting it in here too would
+    # send it twice and make the point's `identity.skill_sha` name a prompt that does not
+    # exist. A method that wants a *different* skill reads its own file and passes
+    # `skill=False` to `editor.ask` / `editor.propose_and_apply`.
     return (
         f"Round {round_index}. The harness scored {incumbent} on the task set.\n\n"
         + (f"## Why each task failed, as the checks reported it\n{failures}\n\n"
            if failures else "")
-        + (f"## How to improve a harness (the platform's skill)\n{skill}\n\n"
-           if skill else "")
         + f"## What the harness did last round\n{traces}\n\n"
         "## Current harness sources\n"
         + "\n\n".join(f"### {k}\n```\n{v}\n```" for k, v in sources.items())
@@ -136,6 +119,13 @@ def main() -> int:
     req = editor.read_request()
     editor.require_api(req)
     base = Path(req["base_harness"])
+
+    # **This method does not drive a CLI improver, and that is a decision left open.**
+    # `methods/cli_improver.py` is where driving one lives (extracted from the deleted
+    # `methods/codex`); this method could call it when `cli_improver.applies(req)`, and for
+    # one afternoon it did -- which silently changed what a *default* run does, because the
+    # registry's default improver is codex, a CLI. The trade-off is recorded as an open
+    # decision in `INTERFACE.md` §4.49 rather than settled here.
 
     try:
         reply = editor.ask(build_prompt(base, req), base=base)

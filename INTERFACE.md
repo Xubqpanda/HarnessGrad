@@ -1620,6 +1620,42 @@ the method. A method that ships its own `skill.md` overrides the default; a meth
 none gets this one -- which is what makes "same skill, different rule" a real comparison
 rather than a slogan.
 
+**Who puts it in the prompt is the platform, not each method.** `editor.ask` prepends this
+file to every prompt it sends (`editor.skill_block`, `skill=False` to decline), because a
+curve point carries `identity.skill_sha` and that field means "the skill this prompt
+carried". Until 2026-10-04 each method read the file itself and four of twelve did, so for
+the other eight the field described a prompt nobody sent. A method with its own skill passes
+it to the model itself and declines the default, and the two cannot then arrive together.
+
+### 4.49.1 Open decision: which improver is the *default*, and what a method owes it
+
+`improvers/improvers.json` names **codex -- a CLI -- as the default**, so an ordinary run
+resolves a CLI improver, records it in `identity.improver`, and binds its runtime trees.
+
+Meanwhile every method in `methods/` carries its own editor: the seven ports and
+`llm_improver` call `editor.ask`, which is a chat endpoint. Two consequences, both measured:
+
+* With the default, the record **names a tool that composed nothing**. `HG_METHOD_BASE_URL`
+  is only injected when the resolved improver *is* an endpoint, so a method under the default
+  falls back to `.env` and calls whatever is there while the point says `codex`.
+* Driving the CLI is possible -- `methods/cli_improver.py` is that implementation, extracted
+  when `methods/codex` was deleted for not being a paper's rule -- and wiring it into the
+  reference method for one afternoon silently changed what a *default* run does (it started a
+  real codex session). That is why it is not wired in.
+
+Two coherent fixes, and no third:
+
+1. **Make the default an endpoint** (`deepseek`), so the default is a tool that works
+   unattended and the record is true; `--improver codex` then means "drive the CLI", and the
+   method that wants it calls `methods/cli_improver.py`. Cost: a hosted endpoint becomes the
+   default path for every run, which needs its key in the environment.
+2. **Require every method to drive the resolved improver**, refusing loudly when it cannot
+   (`editor.model_settings` is the single place that can say so). Cost: a method can no
+   longer carry its own editor without saying why, which is most of what the ports are.
+
+Not decided. Until it is, prefer naming an endpoint explicitly (`--improver deepseek`) so the
+record and the run agree.
+
 ### 4.50 Choosing the improver is part of the experiment
 
 §4.49 made the improver a recorded fact. It has to be a **chosen** one too, or the record
@@ -1677,7 +1713,7 @@ already resolved rather than letting a method rediscover it:
 | what the method needs | how it now arrives |
 |---|---|
 | which improver, and where | the request carries `improver` -- the same `name`/`version`/`sha256`/`model`/`path` the curve point records, so the method cannot run a different one |
-| the default skill | staged in the channel as `_harnessgrad/SKILL.md` (§4.7), which is where the things a method may read already live |
+| the default skill | staged in the channel as `_harnessgrad/SKILL.md` (§4.7), which is where the things a method may read already live -- and injected at the front of every prompt `editor.ask` sends, unless the method declines it (`skill=False`). The injection is the platform's, not each method's, because the point's `identity.skill_sha` names a skill: with twelve methods each deciding for itself, four of them read it and the field described a prompt the other eight never sent |
 | the improver's runtime | `tools/improver.py:runtime_trees` reports the package directory, the interpreter named in the launcher's shebang, and the config home (`~/.codex`); the method sandbox binds them **read-only**, exactly like the method's own program |
 
 The last row is the one that needed a decision rather than a bug fix. An improver is a tool

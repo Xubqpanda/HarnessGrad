@@ -118,7 +118,7 @@ def config_home() -> Path | None:
     """The improver's own state directory: its model, and its credentials.
 
     An improver is a tool with a config, and a method that cannot read the config cannot
-    call a model. Measured with `methods/codex` under the method sandbox: the method
+    call a model. Measured with the CLI improver under the method sandbox: the method
     copies `config.toml` and `auth.json` out of here into the session's own `CODEX_HOME`,
     and inside its namespace there was nothing to copy -- so the session would have had
     no provider and no key, and the failure would have looked like a method bug.

@@ -236,7 +236,7 @@ def test_the_method_sandbox_binds_the_improver_but_never_the_platform(tmp_path):
     tool = tmp_path / "node_modules" / "@openai" / "codex"
     tool.mkdir(parents=True)
     plan = methods._method_sandbox_plan(
-        tmp_path / "work", [sys.executable, str(ROOT / "methods" / "codex" / "run.py")],
+        tmp_path / "work", [sys.executable, str(ROOT / "methods" / "llm_improver" / "run.py")],
         tmp_path / "scratch",
         runtime=(str(tool), str(ROOT / "tools"), "/usr", str(ROOT / "harnessgrad")))
     assert plan["runtime_paths"] == (tool,), plan["runtime_paths"]
