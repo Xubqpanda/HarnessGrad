@@ -333,6 +333,63 @@ silently becomes "use the fewest tokens". The default is `0.001` (100k tokens co
 score: enough to break a tie, small enough that a real quality gain survives), and every point
 carries the coefficients used.
 
+### 3.9 Considered, and not ported -- with the reason each time
+
+Four more sources were read (2026-10-04). None is in `methods/`, and the difference between
+"no rule was published" and "a rule exists but is not portable" matters enough to record:
+
+* **AlphaEvolve** (arXiv 2506.13131, Google DeepMind). *No decision rule is stated.* The paper
+  says its database is "inspired by a combination of the MAP elites algorithm and
+  island-based population models" and stops there: no sampling distribution, no admission
+  threshold, no stopping rule. What it does specify presupposes method-owned evaluation (a
+  user-supplied `evaluate`, ~100 compute-hours per solution), an evaluation cascade that
+  grades *then discards*, and a candidate database -- all three of which this platform owns.
+  The system is not released (results notebook only). What survives is a proposer, which is
+  `methods/editor.py`.
+* **KernelEvolve** (arXiv 2512.23236, Meta; ISCA 2026). *A rule exists but only as a menu.*
+  It formalizes search as `(F, pi_sel, O, tau)` with `F(v) = t_pytorch / t_triton` (failures
+  score 0) and offers greedy / MCTS(UCT) / evolutionary selection -- **without saying which
+  one ran**, and with no UCT constant, population size, stall window or numeric budget. The
+  portable half is the greedy option, which is the "keep the measured best" this platform
+  already does; the informative half is its context-rich proposer, which needs profiling
+  counters, compiler errors and a retrieval knowledge base -- feedback a scalar-scoring
+  platform withholds. Recorded here as a **known platform limit**, not as a gap in KernelEvolve.
+* **OpenAI's RSI writings** (Preparedness Framework v2, the GPT-6 Astra system card,
+  "Research acceleration", "An Alien Mind", the safety-case and standards posts). These are
+  capability claims and a safety/governance framework, not an improvement algorithm. The one
+  quantified rule is a development gate -- *"Until we have specified safeguards and security
+  controls that would meet a Critical standard, halt further development"* -- which does not
+  rank candidates. The RSI-specific evaluations are unreleased, and `openai.com/index/*`
+  returns 403 to every fetch method.
+* **Anthropic's RSI writings** (the Institute essay; the automated-alignment-researcher posts
+  and reports; `A3`; RSP v3.0). These improve **weights**, not harnesses -- no official
+  Anthropic writing describes an agent improving its own harness, tooling or training loop --
+  so there is no method to port. But two *evaluator-side policies* they state explicitly and
+  ship as open source are now recorded by this platform: the geometric mean and the
+  capability-floor disqualification. See §3.10.
+
+### 3.10 Anthropic's two scoring policies, recorded and not enforced
+
+`alignment.anthropic.com/2026/automated-alignment-researchers/` states both as rules of its
+evaluator, and `harnessgrad/policies.py` ports them as **fields on the curve point**:
+
+* **`score_geomean`** -- *"the overall score is the geometric mean of the scored benchmarks, so
+  the lowest one binds and all must be lifted"*. An arithmetic mean lets one task's gain pay
+  for another's loss; this refuses that trade. The measured caveat is in the module: on binary
+  per-task scores it is 0 (clamped to 1e-6) whenever any task fails, which is why it is a
+  recorded field and not *the* score -- changing `score` would make every earlier curve
+  incomparable (`INTERFACE.md` §3 is a frozen contract).
+* **`capability_floor`** -- *"disqualifies a method, whatever its score, if the trained
+  model's 95% confidence interval on any capability benchmark falls entirely below the base
+  model's"*. Checked per task against the run's own H0 point; `ci_entirely_below` is `null`
+  when a single sample cannot answer the question, because "we could not ask" must not read
+  like a passing grade.
+
+Neither is enforced. This platform has no acceptance rule (`docs/framework_design.md` §1), and
+a candidate already handed over cannot be refused; a method that wants Anthropic's gate reads
+the numbers off the point. Same split as the noise band: the number is the platform's, the
+decision is the method's.
+
 ---
 
 ## 5. What porting found in the originals
