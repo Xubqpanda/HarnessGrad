@@ -50,7 +50,8 @@ skill, two ways of handing it over.
 | HarnessX | arXiv 2606.14249 (`darwin-agent/HarnessX`) | the acceptance gate (historical best, tolerance, passed-count noise guard, cost penalty) and the pre-registration |
 | TTHE | arXiv 2607.08124 (`junnie00/TTHE`) | fixed branch-role schedule, validity gate, proposal card, "the incumbent is always acceptable" |
 | Meta-Harness | arXiv 2603.28052 (`stanford-iris-lab/meta-harness`) | the frontier rule: a **per-task** best map plus an overall best, the base choice that implies, and the evolution-summary row (declared hypothesis beside its measured delta) |
-| ~~codex~~ | -- | **removed 2026-10-04.** It was never a paper method; it was the improver layer wearing a method's name. Driving the resolved CLI improver now lives in `methods/cli_improver.py` as a library (no method calls it yet: see the open decision in `INTERFACE.md` §4.49), so a rule and a tool can still vary independently -- and `方法 = codex` is no longer a true sentence about a run. The `codex` **improver** stays in `improvers/improvers.json`: it is the tool, not the rule |
+| Dream-RSI | arXiv 2609.14858 (`zhengkid/Dream-RSI`) | the selection rule: `V = quality - b1*cost + b2*cost/k` over **every** measured version with the incumbent in the set, `argmax V`, and the no-regression guarantee it carries |
+| ~~codex~~ | -- | **removed 2026-10-04.** It was never a paper method; it was the improver layer wearing a method's name. Driving the resolved CLI improver now lives in `methods/cli_improver.py` as a library (no method calls it yet; §4.49.1 settled that the default improver is an endpoint, so driving a CLI is one explicit `--improver codex` away and nobody has needed it), so a rule and a tool can still vary independently -- and `方法 = codex` is no longer a true sentence about a run. The `codex` **improver** stays in `improvers/improvers.json`: it is the tool, not the rule |
 | `llm_improver`, `echo_base`, `noop` | this platform | the shared diagnose-and-edit loop; a contract self-test; the floor every curve must beat |
 
 One adapted method has **no port at all**, and one has no port *yet*:
@@ -295,6 +296,42 @@ with Read/Write/Bash and read-only DB probes to a single shared chat call.
 7. **The editor is a single-turn chat call** with JSON repair, not a tool-using agent. The
    `editor` is shared on purpose: it is the control for "the improver", so that a rule can be
    measured with the improver held constant.
+
+### 3.8 Dream-RSI -- deploying a version, not accepting a candidate
+
+**Idea.** The exploration policy is *executable code*; completed discovery trees are kept as
+an exact replay simulator so candidate policies can be scored off-policy at zero execution
+cost; the best-scoring policy is redeployed. The selection step, quoted from §3:
+
+```
+V_i^m = max_{v in T_i^{m,*}} s_v - b1*N_i^m + b2*N_i^m / max(1, k_i^{m,*})
+V^m   = (1/t) * sum_i V_i^m
+pi_{t+1} = pi_t^{m*},  m* in argmax_m V^m
+"Because the candidate set includes the current policy, this selection satisfies V^{m*} >= V^0."
+```
+
+**The one port that does not need mode A's missing reject step.** Its accept/reject applies to
+the *policy* -- which version to deploy -- not to a proposal, so keeping the incumbent inside
+the candidate set is the whole of the guarantee, and this platform already keeps every
+measured round on the curve with the last one as the incumbent. `select()` therefore returns
+`argmax V` **and checks** `V* >= V^incumbent`, recording the result as
+`guarantee_holds` -- a checked fact rather than a quotation. `base_round()` makes the
+selection executable: the next candidate is built on the selected round's staged state
+(resolved through `states/index.json`), the same degradation HarnessX's revert and
+Meta-Harness's frontier take.
+
+**Transplanted:** the `V` formula with cost in kilo-tokens, the selection over all versions,
+the guarantee, and the base decision. **Not:** the replay simulator (`max_{v in T} s_v` needs a
+recorded discovery tree; one score per round makes this a fixed-test-set best-of), the offline
+`M`-revision phase (one revision per round here, every one paid for), and the parallelism
+bonus (`k` is the run's `--trials`, which a method does not choose, so `b2` defaults to 0 and
+the value is recorded).
+
+**Measured while porting:** the cost coefficient cannot be copied blindly. At `b1 = 0.05` per
+kilo-token a 100k-token round costs 5.0 -- five times the whole quality range -- so `argmax V`
+silently becomes "use the fewest tokens". The default is `0.001` (100k tokens cost 0.1 of
+score: enough to break a tie, small enough that a real quality gain survives), and every point
+carries the coefficients used.
 
 ---
 

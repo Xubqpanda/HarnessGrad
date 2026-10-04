@@ -27,6 +27,7 @@ from eval.console import CONSOLE as console
 from eval.runner import evaluate
 from harnessgrad import PLATFORM_API_VERSION
 from harnessgrad import code_metrics
+from harnessgrad import policies
 from harnessgrad.channel import _stage_for_method
 from harnessgrad.environments import _env_record
 from harnessgrad.environments import _report_harness_failed
@@ -340,6 +341,31 @@ def _run_mode_a(args, work, man, run_id, mode, curve, h0_sha, base, tasks,
         # the method-facing page quotes as "what moved this round".
         point["editable_surface_touched"] = _touched_paths(
             work, curve[-1]["identity"]["harness_sha"], sha)
+        # ------------------------------------------------------------------
+        # Anthropic's two evaluator-side policies, **recorded rather than enforced**
+        # (`harnessgrad/policies.py` states why): a geometric mean whose lowest term binds,
+        # and the capability-floor check that disqualifies a candidate "whatever its score"
+        # when its interval on any task lies entirely below the baseline's. This platform has
+        # no acceptance rule -- the method owns that -- so the numbers go on the point and a
+        # method that wants the gate reads them from there.
+        #
+        # The baseline is the run's own H0 point: it is measured on the same task set, by the
+        # same platform, and it is the thing "did this edit help" is already about.
+        # Recorded only where a baseline exists and both sides have the studied breakdown, so
+        # H0 itself and an eval-side point carry neither field rather than a null.
+        studied = policies.studied_per_task(point)
+        baseline_point = curve[0] if curve else None
+        baseline_studied = (policies.studied_per_task(baseline_point)
+                            if baseline_point else {})
+        if res is not None and studied and baseline_studied:
+            point["score_geomean"] = round(policies.geomean(list(studied.values())), 6)
+            point["capability_floor"] = {
+                "baseline": f"round-{baseline_point.get('round', 0)}",
+                **policies.floor_violations(
+                    studied, baseline_studied,
+                    candidate_std=(res.get("per_task_std") or {}),
+                    baseline_std=(baseline_point.get("per_task_std") or {})),
+            }
         # **What the candidate is, as code.** HarnessDev measured this on the harnesses
         # their creators wrote: "of 169 new functions or classes, 113 are reachable from
         # the entry point, 31 are reachable only through dead code, and 25 have no caller"

@@ -1,0 +1,5 @@
+{
+ "kind": "published",
+ "title": "Dream-RSI:把"部署哪个版本"变成 argmax V",
+ "note": "移植的是它的选择规则:V = quality − b1·成本(kilo-token) + b2·成本/k,在**包含 incumbent 在内**的全部已测版本上取 argmax,所以它自带不退化保证(V* ≥ V^0)。这是我们手上唯一一个**不需要 mode A 的拒绝步**就能完整表达的方法 —— 因为它的接受/拒绝作用在"部署哪个版本"上,不作用在"已交出的候选"上;平台本来就把每一轮留在曲线上、最后一个是 incumbent,所以保证在这里是**核对出来的事实**(`guarantee_holds`)而不是声明。带不过来的是它的 replay simulator(`max_{v∈T} s_v` 需要对已记录的 discovery tree 取最大,我们每轮只有一个分数),以及它"离线评分、零执行成本"的那一半;并行奖励项在 mode A 里 k 恒定(=--trials),所以 b2 默认 0 并记录。见 docs/methods_we_port.md。"
+}

@@ -1,39 +1,39 @@
 {
-  "_why": "One place that says which improver to use and how it is governed. `default` names an entry below; an entry's `version` is what is resolved: an exact version, `latest` (highest verified on this machine), or an absolute path. Whatever is resolved is reported as an immutable fact (version + sha256) and belongs on every curve point -- `latest` means 'do not pin', never 'do not record'.",
-  "default": "codex",
-  "improvers": {
-    "codex": {
-      "name": "codex",
-      "kind": "cli",
-      "version": "latest",
-      "path": "",
-      "modified": false,
-      "env": {
-        "CODEX_HOME": ".codex-home"
-      },
-      "note": "The upstream Codex CLI, unmodified. `latest` because the first question a user asks is 'can I use the current one' -- and because the version actually used is recorded, so this stays reproducible in the only sense that matters: a number always says what produced it."
+    "_why": "One place that says which improver to use and how it is governed. `default` names an entry below; an entry's `version` is what is resolved: an exact version, `latest` (highest verified on this machine), or an absolute path. Whatever is resolved is reported as an immutable fact (version + sha256) and belongs on every curve point -- `latest` means 'do not pin', never 'do not record'. The `default` is an **endpoint**, not the CLI: an unattended run has to be able to use the default, and a CLI needs a logged-in account, a HOME of its own and a long timeout — measured, making codex the default meant a run resolved a CLI, recorded it in `identity.improver`, and then a method carrying its own editor called whatever `.env` held instead. That is the defect `INTERFACE.md` §4.49.1 records; the decision there is option A, and this line is it.",
+    "default": "deepseek",
+    "improvers": {
+        "codex": {
+            "name": "codex",
+            "kind": "cli",
+            "version": "latest",
+            "path": "",
+            "modified": false,
+            "env": {
+                "CODEX_HOME": ".codex-home"
+            },
+            "note": "The upstream Codex CLI, unmodified. `latest` because the first question a user asks is 'can I use the current one' -- and because the version actually used is recorded, so this stays reproducible in the only sense that matters: a number always says what produced it."
+        },
+        "local": {
+            "name": "local",
+            "kind": "openai-compatible",
+            "version": "",
+            "path": "",
+            "modified": false,
+            "note": "A local model as the improver, through the platform's own chat-completions client (methods/editor.py). Kept as an option, not a default: measured, this vLLM's /v1/responses returns tool calls as <tool_call> TEXT rather than structured function_call items, so a codex-style loop cannot use it. Re-evaluate when a local model is chosen; the plan is to select one specifically for this role."
+        },
+        "deepseek": {
+            "name": "deepseek",
+            "kind": "openai-compatible",
+            "version": "",
+            "path": "",
+            "modified": false,
+            "model": "deepseek-flash",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key_env": "DEEPSEEK_API_KEY",
+            "note": "A hosted chat-completions provider used as the improver, through the platform's own client (`methods/editor.py`) -- the same code path as `local`, so a method does not need a second implementation. The model is DeepSeek-V4.1-Flash, and the project does not use any other DeepSeek model (`_forbidden_models`, enforced by `resolve()` and by `driver.py`); `--improver-model` can still choose a *different endpoint's* model, because that is a different experiment, but not a forbidden one. Declared here rather than left to `.env` because 'which improver ran' has to be a recorded fact: the entry names the endpoint and the model, and the platform injects both into the method's environment, so the number on the curve point and the endpoint the method called cannot disagree."
+        }
     },
-    "local": {
-      "name": "local",
-      "kind": "openai-compatible",
-      "version": "",
-      "path": "",
-      "modified": false,
-      "note": "A local model as the improver, through the platform's own chat-completions client (methods/editor.py). Kept as an option, not a default: measured, this vLLM's /v1/responses returns tool calls as <tool_call> TEXT rather than structured function_call items, so a codex-style loop cannot use it. Re-evaluate when a local model is chosen; the plan is to select one specifically for this role."
-    },
-    "deepseek": {
-      "name": "deepseek",
-      "kind": "openai-compatible",
-      "version": "",
-      "path": "",
-      "modified": false,
-      "model": "deepseek-flash",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key_env": "DEEPSEEK_API_KEY",
-      "note": "A hosted chat-completions provider used as the improver, through the platform's own client (`methods/editor.py`) -- the same code path as `local`, so a method does not need a second implementation. The model is DeepSeek-V4.1-Flash, and the project does not use any other DeepSeek model (`_forbidden_models`, enforced by `resolve()` and by `driver.py`); `--improver-model` can still choose a *different endpoint's* model, because that is a different experiment, but not a forbidden one. Declared here rather than left to `.env` because 'which improver ran' has to be a recorded fact: the entry names the endpoint and the model, and the platform injects both into the method's environment, so the number on the curve point and the endpoint the method called cannot disagree."
+    "_forbidden_models": {
+        "deepseek-v4-pro": "we use `deepseek-flash` (DeepSeek-V4.1-Flash) instead: it scores better on our tasks and costs less. Recorded here as a refusal rather than a convention, because a run that quietly used a different model would put a number on a curve nobody can compare against anything."
     }
-  },
-  "_forbidden_models": {
-    "deepseek-v4-pro": "we use `deepseek-flash` (DeepSeek-V4.1-Flash) instead: it scores better on our tasks and costs less. Recorded here as a refusal rather than a convention, because a run that quietly used a different model would put a number on a curve nobody can compare against anything."
-  }
 }

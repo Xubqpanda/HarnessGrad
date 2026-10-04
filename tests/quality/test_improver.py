@@ -170,8 +170,20 @@ def test_a_real_run_records_the_improver_on_every_point(tmp_path):
             continue
         # `ok`/`reason` 是本次进程的簿记,不是记录该带的东西。
         assert "ok" not in imp and "reason" not in imp, imp
-        for field in ("name", "version", "sha256"):
-            assert imp.get(field), (field, imp)
+        assert imp.get("name"), imp
+        # **身份因 kind 而异,这不是放宽断言。** 一个 CLI 改进器是磁盘上的一个程序,它的
+        # 身份就是"哪个版本、哪份 sha256"——不记下来,"改进器升级了"和"方法变强了"分不开。
+        # 一个端点型改进器不是程序:`resolve` 对它的定义是"端点配好了",版本与哈希本来就
+        # 是空字符串,而它真正的身份是 **端点地址和模型名**(记录里不出现密钥)。
+        # 默认改进器 2026-10-04 从 codex(CLI)改成 deepseek(端点)之后,旧断言要求 version
+        # 非空,把一个正确的记录判成了失败。
+        if imp.get("kind") == "cli":
+            for field in ("version", "sha256", "path"):
+                assert imp.get(field), (field, imp)
+        else:
+            for field in ("model", "path"):
+                assert imp.get(field), (field, imp)
+            assert imp.get("version") in ("", None) and imp.get("sha256") in ("", None), imp
 
 
 # ------------------------------------------- 改进器的运行环境(不是身份) ---

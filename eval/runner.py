@@ -41,10 +41,39 @@ def harness_env() -> dict:
     environment's credential. Services only exist on `exec` -- where
     `container_env`'s allowlist already excluded it -- so the leak would have been on
     the path with no services at all, which is exactly where nobody looks for one.
+
+    **A fourth name, and the reason the rule is no longer only a prefix list.** The
+    improver registry declares each improver's credential variable (`api_key_env`), and
+    the `deepseek` entry names `DEEPSEEK_API_KEY` -- which matches none of the prefixes
+    above, so the harness inherited the *improver's* key. Measured: it took making
+    `deepseek` the default improver (so the name had to exist in `.env`) for the
+    isolation probe to see it. Both earlier leaks were a new budget with a new prefix;
+    this one was the same budget under a name the prefix rule could not know. So the
+    variables the registry declares are stripped by name, and a new improver is covered
+    the moment it is added rather than when someone remembers the prefix.
     """
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith(("HG_METHOD_", "HG_ENV_", "HARNESSGRAD_SEED"))}
+           if not k.startswith(("HG_METHOD_", "HG_ENV_", "HARNESSGRAD_SEED"))
+           and k not in _improver_credentials()}
     return env
+
+
+def _improver_credentials() -> set[str]:
+    """Every environment variable the improver registry declares as a credential.
+
+    Read lazily and defensively: the harness environment must not fail to build because a
+    config file is missing, and `harness_env()` is called once per task on paths that have
+    nothing to do with improvers. The registry is read through `tools/improver.py`'s own
+    loader so there is one reader of that file, not two.
+    """
+    try:
+        from tools.improver import load_config
+        config = load_config() or {}
+    except Exception:                                          # noqa: BLE001
+        return set()
+    names = {(entry or {}).get("api_key_env")
+             for entry in (config.get("improvers") or {}).values()}
+    return {name for name in names if name}
 
 
 def _last_identity(trace: str) -> dict | None:

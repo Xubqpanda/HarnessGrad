@@ -1653,8 +1653,23 @@ Two coherent fixes, and no third:
    (`editor.model_settings` is the single place that can say so). Cost: a method can no
    longer carry its own editor without saying why, which is most of what the ports are.
 
-Not decided. Until it is, prefer naming an endpoint explicitly (`--improver deepseek`) so the
-record and the run agree.
+**Decided 2026-10-04: option 1.** `improvers/improvers.json` now names `deepseek` as the
+default, so an ordinary run resolves an endpoint, `_method_env` injects its base URL, model
+and credential into the method, and the record and the run agree by construction -- every
+method in `methods/` reaches a model through `editor.ask`, which reads `HG_METHOD_*`.
+
+What that fixes, measured: with `codex` as the default, `identity.improver` on every point
+named a tool that composed nothing, and the method called whatever `.env` happened to hold.
+The same defect the `deepseek` entry was written to prevent (`tools/improver.py:resolve`,
+"a record that names one endpoint and a method that calls another").
+
+What it costs: the default path now needs `DEEPSEEK_API_KEY` in the environment (`.env` or
+the real environment; `.env.example` carries the name). Without it `resolve` returns
+`ok=False`, the driver warns at the door, and the run carries **no** improver identity rather
+than a wrong one -- which is the correct failure.
+
+`--improver codex` still resolves the CLI, and a method that wants to drive it calls
+`methods/cli_improver.py`; none does today, and that is stated there rather than hidden.
 
 ### 4.50 Choosing the improver is part of the experiment
 
